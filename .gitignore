@@ -9,6 +9,7 @@ agent/.env
 
 .claude/*
 !.claude/hooks.json
+!.claude/skills/
 .vscode/
 learn-claude-code-main/
 agent/sessions/
