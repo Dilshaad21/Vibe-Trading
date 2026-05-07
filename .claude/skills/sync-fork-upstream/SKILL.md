@@ -15,9 +15,10 @@ Fetch upstream changes, assess divergence complexity, merge or ask clarifying qu
 ```bash
 git remote -v
 # If no 'upstream' remote:
-git remote add upstream <upstream-repo-url>
+git remote add upstream https://github.com/HKUDS/Vibe-Trading.git
 ```
-Derive the upstream URL from the fork's GitHub page (`forked from …`) or ask the user.
+Upstream repo: **https://github.com/HKUDS/Vibe-Trading**
+Fork remote (origin): `git@github.com:Dilshaad21/Vibe-Trading.git`
 
 ### 2. Fetch upstream & inspect divergence
 ```bash
