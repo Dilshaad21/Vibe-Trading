@@ -113,6 +113,50 @@ Per `CONTRIBUTING.md`, treat these as core and open an issue / ask before non-tr
 - **Swarm preset**: add a YAML to `agent/src/swarm/presets/` defining agents and the DAG. The presets are bundled as package data — `pyproject.toml`'s `[tool.setuptools.package-data]` already includes them; do not move the directory without updating that section (see prior PyPI bundling regression in README news for 2026-04-28).
 - **Data loader**: implement `backtest/loaders/base.DataLoader`, register in `backtest/loaders/registry.py`, add tests.
 
+## Portfolio analysis & rebalancing workflow
+
+Use plain English prompts — the agent picks the right skill, data source, and backtest engine automatically.
+
+### 1. Start the agent
+```bash
+vibe-trading                    # interactive TUI
+vibe-trading serve --port 8899  # Web UI at localhost:8899
+```
+
+### 2. Upload your portfolio / trade history
+```bash
+vibe-trading --upload my_trades.csv  # broker export (同花顺/东财/富途/generic CSV)
+```
+Then: *"Profile my current portfolio and identify concentration risks"*
+
+### 3. Analysis prompts
+- **Allocation:** *"Analyze my portfolio allocation across sectors and asset classes, identify overweights"*
+- **Correlation:** *"Show a correlation heatmap for my holdings and flag highly correlated positions"*
+- **Risk metrics:** *"Calculate VaR, max drawdown, and Sharpe ratio for my current portfolio"*
+
+### 4. Market trend analysis
+- *"Run macro analysis — current Fed rate path, sector rotation signals, and EM vs DM outlook"*
+- Full screening → backtest → risk audit pipeline via swarm:
+  ```bash
+  vibe-trading --swarm-run quant_strategy_desk '{"universe": "S&P 500", "horizon": "3 months"}'
+  ```
+
+### 5. Rebalancing recommendations
+- *"Given my current holdings, suggest a rebalance to target 60/40 equity/bond with max 10% single-stock weight"*
+- *"Run mean-variance optimization on my portfolio with max 15% drawdown constraint"*
+- The 4 built-in optimizers (`mean_variance`, `risk_parity`, `equal_volatility`, `max_diversification`) are invoked automatically when you ask for optimization.
+
+### 6. Backtest a rebalancing strategy before acting
+```bash
+vibe-trading run -p "Backtest monthly rebalancing of [your tickers] back to equal weight over 2 years"
+```
+
+### 7. Get a committee view before making a call
+```bash
+vibe-trading --swarm-run investment_committee '{"topic": "Should I reduce tech exposure and rotate to energy?"}'
+```
+Triggers bull/bear debate → risk review → PM final call with a structured recommendation.
+
 ## Useful environment variables
 
 - `LANGCHAIN_PROVIDER`, `<PROVIDER>_API_KEY`, `<PROVIDER>_BASE_URL`, `LANGCHAIN_MODEL_NAME` — LLM config (see `agent/.env.example`)
