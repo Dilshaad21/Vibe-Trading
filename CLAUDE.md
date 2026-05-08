@@ -42,6 +42,20 @@ docker compose up --build   # exposes 127.0.0.1:8899 by default, runs as non-roo
 # INDMoney portfolio integration (one-time OAuth dance — Authorization Code + PKCE
 # + Dynamic Client Registration; saves tokens to ~/.vibe-trading/indmoney/)
 python scripts/indmoney_oauth.py
+
+# Expose vibe-trading-mcp to a Claude Code session (per-machine, gitignored —
+# run once after `pip install -e ".[dev]"` in any new environment, e.g. on a
+# fresh machine, in a new venv, or after a clone). Claude Code becomes the
+# orchestrating LLM and gets every registered Vibe-Trading tool — backtest,
+# factor_analysis, indmoney_holdings, indmoney_sync, list_skills, load_skill,
+# etc. — callable directly. No separate LLM API key needed; your Claude Code
+# subscription covers it.
+claude mcp add vibe-trading $(which vibe-trading-mcp)
+# After registering, restart your Claude Code session in this directory and:
+#   `claude mcp list`  → terminal: vibe-trading appears in the registry
+#   `/mcp`             → inside Claude Code: vibe-trading shows as connected
+# Other MCP clients (Cursor, Claude Desktop, OpenClaw) follow the same pattern;
+# see the docstring at the top of agent/mcp_server.py for client-specific config.
 ```
 
 CI (`.github/workflows/test.yml`) runs: `pip install -e ".[dev]"`, `py_compile` on the entry-point and core files, `pytest` (same ignore as above), then `npm ci && npm run build` in `frontend/`. Match this locally before pushing.
