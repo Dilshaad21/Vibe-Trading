@@ -6,6 +6,8 @@ import csv
 import json
 from pathlib import Path
 
+import pytest
+
 from src.integrations.indmoney.normalizer import (
     normalize_cash,
     normalize_holdings,
@@ -112,3 +114,85 @@ def test_normalize_handles_empty_collections():
     trades, events = normalize_transactions({"items": [], "account_id": "X"})
     assert trades == []
     assert events == []
+
+
+# ---------- v2: real INDMoney networth payloads ----------
+
+def test_normalize_networth_holdings_us_stock_uses_investment_code_as_symbol():
+    from src.integrations.indmoney.normalizer import normalize_networth_holdings
+    holdings = normalize_networth_holdings("US_STOCK", _load("networth_holdings_us_stock.json"))
+    assert len(holdings) == 2
+    h1, h2 = holdings
+    # Symbol = INDMoney's investment_code (we don't have ticker resolution in v1).
+    assert h1.symbol == "100001"
+    assert h1.name == "Example US Equity One"
+    assert h1.asset_class == "us_equity"
+    assert h1.currency == "INR", "INDMoney returns INR-denominated values for US stocks"
+    assert h1.quantity == 0.5
+    # avg_cost is per-unit (invested_amount / total_units).
+    assert h1.avg_cost == pytest.approx(60000.0)
+    assert h1.market_value == 32000.0
+    assert h1.unrealized_pnl == 2000.0
+
+
+def test_normalize_networth_holdings_ind_stock_marks_indian_equity():
+    from src.integrations.indmoney.normalizer import normalize_networth_holdings
+    holdings = normalize_networth_holdings("IND_STOCK", _load("networth_holdings_ind_stock.json"))
+    assert len(holdings) == 1
+    assert holdings[0].asset_class == "indian_equity"
+    assert holdings[0].symbol == "200001"
+    assert holdings[0].currency == "INR"
+
+
+def test_normalize_networth_holdings_zero_units_does_not_divide_by_zero():
+    from src.integrations.indmoney.normalizer import normalize_networth_holdings
+    payload = {
+        "holdings": [{
+            "investment_code": "300001", "investment": "Zero Units",
+            "asset_type": "US_STOCK", "assetclass_l2": "Global Equity",
+            "invested_amount": 0, "market_value": 0,
+            "total_pnl": 0, "total_units": 0, "unit_price": 0,
+        }]
+    }
+    holdings = normalize_networth_holdings("US_STOCK", payload)
+    assert len(holdings) == 1
+    assert holdings[0].quantity == 0
+    assert holdings[0].avg_cost == 0  # safe fallback when total_units == 0
+
+
+def test_normalize_networth_holdings_mf_marks_mf():
+    from src.integrations.indmoney.normalizer import normalize_networth_holdings
+    payload = {"holdings": [{
+        "investment_code": "400001", "investment": "Example MF Scheme",
+        "asset_type": "MF", "assetclass_l2": "Indian Equity",
+        "invested_amount": 100000, "market_value": 110000,
+        "total_pnl": 10000, "total_units": 10, "unit_price": 11000,
+    }]}
+    holdings = normalize_networth_holdings("MF", payload)
+    assert holdings[0].asset_class == "mf"
+
+
+def test_normalize_networth_snapshot_extracts_totals():
+    from src.integrations.indmoney.normalizer import normalize_networth_snapshot
+    snap = normalize_networth_snapshot(_load("networth_snapshot.json"))
+    assert snap["total_invested"] == 600000.0
+    assert snap["total_current_value"] == 4000000.0
+    assert snap["total_networth"] == 4000000.0
+    # Per-asset-type lookup is preserved verbatim for downstream use.
+    by_type = {item["asset_type"]: item for item in snap["investments"]}
+    assert "STOCK" in by_type
+    assert "US_STOCK" in by_type
+    # Liquid assetclass surfaces in the assets array (used as cash proxy).
+    by_class = {item["assetclass_l2"]: item for item in snap["assets"]}
+    assert "Liquid" in by_class
+    assert by_class["Liquid"]["current_value"] == 700000.0
+
+
+def test_normalize_networth_snapshot_missing_fields_defaults_to_zero():
+    from src.integrations.indmoney.normalizer import normalize_networth_snapshot
+    snap = normalize_networth_snapshot({})
+    assert snap["total_invested"] == 0.0
+    assert snap["total_current_value"] == 0.0
+    assert snap["total_networth"] == 0.0
+    assert snap["investments"] == []
+    assert snap["assets"] == []
