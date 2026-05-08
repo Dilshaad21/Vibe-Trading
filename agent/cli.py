@@ -1740,6 +1740,59 @@ def cmd_provider_login(provider: str) -> int:
         return EXIT_RUN_FAILED
 
 
+def cmd_indmoney_login() -> int:
+    """Run interactive OAuth for INDMoney via oauth-cli-kit."""
+    try:
+        from oauth_cli_kit import login_oauth_interactive
+    except ImportError:
+        console.print("[red]oauth-cli-kit is not installed.[/red] Run: pip install oauth-cli-kit")
+        return EXIT_USAGE_ERROR
+    try:
+        console.print("[cyan]Starting INDMoney OAuth login...[/cyan]\n")
+        # Provider config (issuer, client_id, scopes, authorization_endpoint,
+        # token_endpoint) is captured in the discovery notes from Task 0:
+        # docs/superpowers/specs/2026-05-07-indmoney-discovery-notes.md.
+        # If oauth-cli-kit's built-in providers don't include INDMoney, the
+        # fallback is to roll Authorization Code + PKCE directly with httpx
+        # (RFC 6749 §4.1 + RFC 7636) — see plan Task 11 for the sketch.
+        token = login_oauth_interactive(
+            provider="indmoney",
+            print_fn=lambda text: console.print(text),
+            prompt_fn=lambda text: Prompt.ask(text),
+        )
+        if not token or not getattr(token, "access", None):
+            console.print("[red]Authentication did not return a token.[/red]")
+            return EXIT_RUN_FAILED
+
+        from src.integrations.indmoney.auth import Token, TokenCache
+        import time as _time
+        TokenCache().save(Token(
+            access_token=token.access,
+            refresh_token=getattr(token, "refresh", "") or "",
+            expires_at=int(_time.time()) + int(getattr(token, "expires_in", 3600) or 3600),
+            account_id=getattr(token, "account_id", "") or "default",
+            issued_at=int(_time.time()),
+        ))
+        console.print(f"[green]Authenticated with INDMoney[/green]  [dim]{getattr(token, 'account_id', 'default')}[/dim]")
+        return EXIT_SUCCESS
+    except Exception as exc:
+        console.print(f"[red]Authentication error:[/red] {exc}")
+        return EXIT_RUN_FAILED
+
+
+def cmd_indmoney_status() -> int:
+    """Print whether an INDMoney token is present and not expired."""
+    from src.integrations.indmoney.auth import TokenCache
+    token = TokenCache().load()
+    if token is None:
+        console.print("[yellow]No INDMoney token. Run: vibe-trading indmoney login[/yellow]")
+        return EXIT_USAGE_ERROR
+    expired = token.is_expired()
+    state = "[red]expired[/red]" if expired else "[green]valid[/green]"
+    console.print(f"INDMoney: {state}  account={token.account_id}  expires_at={token.expires_at}")
+    return EXIT_SUCCESS
+
+
 # ---------------------------------------------------------------------------
 # CLI entrypoint
 # ---------------------------------------------------------------------------
@@ -1802,6 +1855,11 @@ def _build_parser() -> argparse.ArgumentParser:
     chat_parser.add_argument("--max-iter", dest="chat_max_iter", type=int, default=50, help="Maximum agent iterations")
 
     subparsers.add_parser("init", help="Interactive setup: create ~/.vibe-trading/.env")
+
+    indmoney_parser = subparsers.add_parser("indmoney", help="Manage INDMoney integration")
+    indmoney_subparsers = indmoney_parser.add_subparsers(dest="indmoney_command")
+    indmoney_subparsers.add_parser("login", help="Authenticate with INDMoney via OAuth")
+    indmoney_subparsers.add_parser("status", help="Show INDMoney token status")
 
     return parser
 
@@ -2119,6 +2177,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.provider_command == "login":
             return cmd_provider_login(args.provider)
         console.print("[red]provider requires a subcommand.[/red] Try: vibe-trading provider login openai-codex")
+        return EXIT_USAGE_ERROR
+    if args.command == "indmoney":
+        sub = getattr(args, "indmoney_command", None)
+        if sub == "login":
+            return cmd_indmoney_login()
+        if sub == "status":
+            return cmd_indmoney_status()
+        console.print("[red]indmoney requires a subcommand.[/red] Try: vibe-trading indmoney login")
         return EXIT_USAGE_ERROR
     if args.command == "run":
         return _handle_prompt_command(
