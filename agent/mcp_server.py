@@ -694,6 +694,53 @@ def scan_shadow_signals(
 
 
 # ---------------------------------------------------------------------------
+# INDMoney portfolio tools
+# ---------------------------------------------------------------------------
+#
+# These are wrappers around the agent-side BaseTool subclasses
+# (agent/src/tools/indmoney_*_tool.py). They auto-register in the in-process
+# tool registry via __subclasses__() discovery, but the MCP surface is
+# hand-curated via @mcp.tool decorators — registry membership alone does not
+# expose a tool over MCP. See docs/indmoney.md for the integration overview
+# and ~/.vibe-trading/indmoney/{token,client}.json for the OAuth setup
+# (run `python scripts/indmoney_oauth.py` once to populate).
+
+@mcp.tool
+def indmoney_holdings(force_refresh: bool = False) -> str:
+    """Read current INDMoney portfolio holdings and cash.
+
+    Calls INDMoney's MCP server to fetch positions across the configured
+    asset types (default IND_STOCK, US_STOCK, MF — override with the
+    INDMONEY_ASSET_TYPES env var). Returns a unified holdings list,
+    per-asset-type investment breakdown, per-class assets breakdown,
+    sector breakdown, totals, and a snapshot file path under
+    agent/uploads/indmoney/. Cache-first with a 15-minute TTL.
+
+    All monetary values are in INR (INDMoney converts US-stock prices
+    server-side); Holding.symbol is INDMoney's investment_code, not a
+    ticker symbol. See docs/indmoney.md for the full envelope shape.
+
+    Args:
+        force_refresh: Skip the TTL cache and re-fetch from the MCP server.
+    """
+    registry = _get_registry()
+    return registry.execute("indmoney_holdings", {"force_refresh": force_refresh})
+
+
+@mcp.tool
+def indmoney_sync() -> str:
+    """Force-refresh the INDMoney holdings cache.
+
+    Calls networth_snapshot + networth_holdings(asset_type=...) for each
+    configured asset type, writes a fresh snapshot, and prunes snapshots
+    older than 30 days. Use after broker activity to bring the cache up
+    to date.
+    """
+    registry = _get_registry()
+    return registry.execute("indmoney_sync", {})
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -1,16 +1,24 @@
-"""Verify the two INDMoney tools are auto-discovered and MCP-published.
+"""Verify the INDMoney tools are wired into both the agent registry AND
+the vibe-trading-mcp surface.
 
-The transactions tool was dropped in v2 — INDMoney's MCP has no
-transaction-history endpoint, so the only tools that ship are
-indmoney_holdings and indmoney_sync.
+The v2 PR shipped with a real bug we missed: tools auto-register in the
+agent's in-process registry via __subclasses__() discovery, but the MCP
+surface is hand-curated via @mcp.tool decorators. Registry membership
+alone does NOT expose a tool over MCP. The earlier version of this file
+checked only the agent registry — false-positive — so this rewrite asserts
+the actual FastMCP surface to prevent the regression from recurring.
 """
 
 from __future__ import annotations
+
+import asyncio
+import importlib
 
 _INDMONEY_TOOLS = {"indmoney_holdings", "indmoney_sync"}
 
 
 def test_indmoney_tools_in_local_registry():
+    """Both tools auto-register in the agent's in-process tool registry."""
     from src.tools import build_registry
     reg = build_registry()
     names = set(reg.tool_names)
@@ -20,6 +28,7 @@ def test_indmoney_tools_in_local_registry():
 
 
 def test_indmoney_tools_have_openai_schema():
+    """Both tools serialise to the OpenAI function-calling schema cleanly."""
     from src.tools import build_registry
     reg = build_registry()
     for name in _INDMONEY_TOOLS:
@@ -30,12 +39,19 @@ def test_indmoney_tools_have_openai_schema():
         assert "parameters" in schema["function"]
 
 
-def test_mcp_server_enumerates_indmoney_tools():
-    """mcp_server.py builds the same registry; smoke check that import works
-    and both tools surface in the underlying registry."""
-    import importlib
+def test_indmoney_tools_exposed_via_fastmcp_surface():
+    """REGRESSION GUARD: assert the FastMCP server actually advertises the
+    INDMoney tools. The earlier version of this test only checked the
+    in-process agent registry, which let the v2 PR ship without the
+    @mcp.tool wrappers. ``mcp.list_tools()`` is the public FastMCP API and
+    matches what an MCP client (e.g. Claude Code via vibe-trading-mcp)
+    actually sees on tools/list.
+    """
     mcp_module = importlib.import_module("mcp_server")
-    from src.tools import build_registry
-    names = set(build_registry().tool_names)
-    assert _INDMONEY_TOOLS <= names
-    assert hasattr(mcp_module, "_get_registry") or hasattr(mcp_module, "build_registry")
+    tools = asyncio.run(mcp_module.mcp.list_tools())
+    names = {t.name for t in tools}
+    assert _INDMONEY_TOOLS <= names, (
+        f"INDMoney tools missing from FastMCP surface. Saw: {sorted(names)}"
+    )
+    # And the dropped transactions tool must NOT have re-appeared.
+    assert "indmoney_transactions" not in names
