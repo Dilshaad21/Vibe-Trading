@@ -1,8 +1,38 @@
 # INDMoney MCP Integration — Design
 
-**Status:** Draft
-**Date:** 2026-05-07
+**Status:** v2 (reshape applied 2026-05-08 after authenticated discovery; see [discovery notes](2026-05-07-indmoney-discovery-notes.md))
+**Date:** 2026-05-07 · v2 amendment 2026-05-08
 **Author:** dmuthalif (with Claude Code, brainstorming skill)
+
+## v2 amendment summary
+
+After the user completed the OAuth dance and the authenticated probe ran
+against `mcp.indmoney.com/mcp` (server `indmcp/1.27.0`), the working
+assumptions in this spec were partly wrong. The reshape:
+
+- **Tool surface.** INDMoney exposes `networth_snapshot` (no inputs) and
+  `networth_holdings(asset_type=...)` — not `get_holdings` / `get_account`.
+  There is **no** `get_transactions` analog; the `IndMoneyTransactionsTool`
+  was deleted.
+- **Currency.** Single-currency INR throughout — even US stock holdings.
+  `Holding.currency` is hard-coded to `"INR"`. `CashSnapshot.cash_usd` is
+  always 0.0; `cash_inr` is the "Liquid" assetclass_l2 value as a soft
+  proxy.
+- **Symbol.** No ticker symbols upstream. `Holding.symbol` is INDMoney's
+  `investment_code` (e.g. `"112192"`).
+- **Transport.** SSE on 200 responses, not plain JSON. Client now parses
+  `event: message / data: {...}` framing and falls back to plain JSON.
+- **Auth shape.** OAuth 2.0 Authorization Code + PKCE + Dynamic Client
+  Registration (confidential client). `client_id` + `client_secret` flow
+  through `IndMoneyClient.__init__` and `_refresh_http`. The CLI
+  subcommand `vibe-trading indmoney login` shells out to
+  `scripts/indmoney_oauth.py`.
+- **Sync tool.** Now a thin "force-refresh holdings" wrapper. The
+  transactions branch is gone.
+
+The sections below have been edited in place to reflect this. Where a
+section is now substantially shorter, that's intentional — the original
+v1 design assumed structure that doesn't exist upstream.
 
 ## 1. Problem & goal
 
