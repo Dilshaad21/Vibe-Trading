@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -118,43 +117,24 @@ def test_holdings_tool_needs_auth_when_no_token(monkeypatch, tmp_path):
     assert out["error_kind"] == "needs_auth"
 
 
-def test_transactions_tool_writes_both_csvs(monkeypatch, tmp_path):
-    transport = _stub_transport({
-        "get_transactions": {
-            "items": [
-                {"datetime": "2026-04-01", "symbol": "AAPL", "name": "Apple",
-                 "type": "buy", "quantity": 1, "price": 150.0, "amount": 150.0,
-                 "fee": 0.0, "currency": "USD"},
-                {"datetime": "2026-04-02", "symbol": "AAPL", "name": "Apple",
-                 "type": "dividend", "quantity": 0, "price": 0.0, "amount": 0.5,
-                 "fee": 0.0, "currency": "USD"},
-            ]
-        }
-    })
-    from src.tools.indmoney_transactions_tool import IndMoneyTransactionsTool
-    _patch_httpx_client(monkeypatch, transport)
-    out = json.loads(IndMoneyTransactionsTool().execute(
-        start_date="2026-04-01", end_date="2026-04-30", force_refresh=True))
-    assert out["ok"] is True
-    assert out["count"] == 1
-    assert out["events_count"] == 1
-    assert Path(out["csv_path"]).exists()
-    assert Path(out["events_csv_path"]).exists()
-
-
 def test_sync_tool_returns_aggregate_status(monkeypatch, tmp_path):
     transport = _stub_transport({
-        "get_holdings":     {"asof": "2026-05-07", "positions": []},
-        "get_account":      {"asof": "2026-05-07", "cash_usd": 0, "cash_inr": 0, "pending_settlement_usd": 0},
-        "get_transactions": {"items": []},
+        "networth_snapshot": {
+            "total_invested": 0, "total_current_value": 0, "total_networth": 0,
+            "investments": [], "assets": [], "sector": [],
+        },
+        "networth_holdings": {"holdings": []},
     })
     from src.tools.indmoney_sync_tool import IndMoneySyncTool
     _patch_httpx_client(monkeypatch, transport)
+    monkeypatch.setenv("INDMONEY_ASSET_TYPES", "US_STOCK")
     out = json.loads(IndMoneySyncTool().execute())
     assert out["ok"] is True
     assert out["status"] == "ok"
     assert out["holdings_count"] == 0
-    assert out["transactions_count"] == 0
+    # The transactions piece was dropped in v2 — INDMoney has no MCP
+    # transaction stream — so the envelope no longer carries a count.
+    assert "transactions_count" not in out
 
 
 def test_sync_tool_needs_auth_returns_auth_url(monkeypatch, tmp_path):
