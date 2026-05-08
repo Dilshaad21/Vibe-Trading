@@ -87,6 +87,26 @@ def test_normalize_networth_holdings_unknown_asset_type_falls_back_to_other():
     assert holdings[0].asset_class == "other"
 
 
+def test_normalize_networth_holdings_handles_unknown_string_in_invested_amount():
+    """Real-world finding from the live smoke: some legacy positions return
+    the literal string 'unknown' for invested_amount / market_value /
+    total_pnl. Float coercion must default these to 0 instead of raising."""
+    payload = {"holdings": [{
+        "investment_code": "999001", "investment": "Legacy Stock",
+        "asset_type": "IND_STOCK", "assetclass_l2": "Indian Equity",
+        "invested_amount": "unknown",
+        "market_value": "unknown",
+        "total_pnl": "unknown",
+        "total_units": 100.0, "unit_price": 0,
+    }]}
+    holdings = normalize_networth_holdings("IND_STOCK", payload)
+    assert len(holdings) == 1
+    assert holdings[0].quantity == 100.0
+    assert holdings[0].avg_cost == 0.0
+    assert holdings[0].market_value == 0.0
+    assert holdings[0].unrealized_pnl == 0.0
+
+
 def test_normalize_networth_holdings_empty_payload():
     assert normalize_networth_holdings("US_STOCK", {}) == []
     assert normalize_networth_holdings("US_STOCK", {"holdings": []}) == []

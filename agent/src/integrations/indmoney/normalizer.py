@@ -19,6 +19,22 @@ _ASSET_TYPE_TO_CLASS = {
 }
 
 
+def _to_float(value: Any, *, default: float = 0.0) -> float:
+    """Coerce a JSON value to ``float`` defensively.
+
+    INDMoney returns the literal string ``"unknown"`` in some monetary
+    fields (e.g. ``invested_amount`` for legacy / corporate-action positions
+    where the cost basis is not known). It also occasionally returns
+    ``None``. Both must coerce to ``default`` rather than raising.
+    """
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _classify_v2(asset_type: str) -> str:
     """Map an INDMoney ``asset_type`` enum value to our ``Holding.asset_class``.
 
@@ -44,16 +60,16 @@ def normalize_networth_holdings(asset_type: str, payload: dict[str, Any]) -> lis
     """
     out: list[Holding] = []
     for h in payload.get("holdings", []) or []:
-        units = float(h.get("total_units", 0) or 0)
-        invested = float(h.get("invested_amount", 0) or 0)
+        units = _to_float(h.get("total_units"))
+        invested = _to_float(h.get("invested_amount"))
         avg_cost = invested / units if units else 0.0
         out.append(Holding(
             symbol=str(h.get("investment_code", "")),
             name=str(h.get("investment", "")),
             quantity=units,
             avg_cost=avg_cost,
-            market_value=float(h.get("market_value", 0) or 0),
-            unrealized_pnl=float(h.get("total_pnl", 0) or 0),
+            market_value=_to_float(h.get("market_value")),
+            unrealized_pnl=_to_float(h.get("total_pnl")),
             currency="INR",
             asset_class=_classify_v2(asset_type),
             asof="",  # networth_holdings is point-in-time; no asof field returned
@@ -70,9 +86,9 @@ def normalize_networth_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
     defaults missing arrays to empty.
     """
     return {
-        "total_invested": float(payload.get("total_invested", 0) or 0),
-        "total_current_value": float(payload.get("total_current_value", 0) or 0),
-        "total_networth": float(payload.get("total_networth", 0) or 0),
+        "total_invested": _to_float(payload.get("total_invested")),
+        "total_current_value": _to_float(payload.get("total_current_value")),
+        "total_networth": _to_float(payload.get("total_networth")),
         "investments": list(payload.get("investments") or []),
         "assets": list(payload.get("assets") or []),
         "sector": list(payload.get("sector") or []),

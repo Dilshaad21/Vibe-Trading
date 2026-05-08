@@ -30,7 +30,11 @@ from src.integrations.indmoney.types import CashSnapshot
 from src.tools.path_utils import _allowed_file_roots  # type: ignore[attr-defined]
 
 DEFAULT_URL = os.getenv("INDMONEY_MCP_URL", "https://mcp.indmoney.com/mcp")
-DEFAULT_TOKEN_URL = os.getenv("INDMONEY_TOKEN_URL", "https://mcp.indmoney.com/oauth/token")
+# RFC 8414 authorization-server metadata at
+# https://mcp.indmoney.com/.well-known/oauth-authorization-server advertises
+# token_endpoint = "https://mcp.indmoney.com/token". An earlier hardcoded
+# default of "/oauth/token" was a v1 guess that returned 403 on every refresh.
+DEFAULT_TOKEN_URL = os.getenv("INDMONEY_TOKEN_URL", "https://mcp.indmoney.com/token")
 DEFAULT_HOLDINGS_TTL = int(os.getenv("INDMONEY_HOLDINGS_TTL_SECONDS", "900"))
 
 

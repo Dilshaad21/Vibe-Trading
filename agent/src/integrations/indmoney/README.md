@@ -30,7 +30,7 @@ python scripts/indmoney_oauth.py
 | Var | Default | Purpose |
 |---|---|---|
 | `INDMONEY_MCP_URL` | `https://mcp.indmoney.com/mcp` | Override for staging |
-| `INDMONEY_TOKEN_URL` | `https://mcp.indmoney.com/oauth/token` | OAuth token endpoint |
+| `INDMONEY_TOKEN_URL` | `https://mcp.indmoney.com/token` | OAuth token endpoint (matches the RFC 8414 well-known metadata) |
 | `INDMONEY_TOKEN_PATH` | `~/.vibe-trading/indmoney/token.json` | Token store (mode 0600) |
 | `INDMONEY_ASSET_TYPES` | `IND_STOCK,US_STOCK,MF` | Comma-separated asset types fetched per refresh. Valid values: `IND_STOCK`, `MF`, `US_STOCK`, `BOND`, `EPF`, `NPS`, `SA`, `FD`, `CRYPTO`, `INSURANCE`, `VEHICLE`, `RE`, `RD`, `AIF`, `PMS`, `PPF` |
 | `INDMONEY_HOLDINGS_TTL_SECONDS` | `900` | Holdings cache TTL (15 min) |
