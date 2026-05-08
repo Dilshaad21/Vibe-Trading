@@ -38,6 +38,10 @@ scripts/dev up | stop | restart [backend|frontend|all] | status | logs [service]
 
 # Docker
 docker compose up --build   # exposes 127.0.0.1:8899 by default, runs as non-root
+
+# INDMoney portfolio integration (one-time OAuth dance — Authorization Code + PKCE
+# + Dynamic Client Registration; saves tokens to ~/.vibe-trading/indmoney/)
+python scripts/indmoney_oauth.py
 ```
 
 CI (`.github/workflows/test.yml`) runs: `pip install -e ".[dev]"`, `py_compile` on the entry-point and core files, `pytest` (same ignore as above), then `npm ci && npm run build` in `frontend/`. Match this locally before pushing.
@@ -61,7 +65,8 @@ Read/write tool batching: consecutive read-only tools execute in parallel via th
 - `providers/` — LLM provider abstraction. Supported providers and metadata live in `providers/llm_providers.json`; OAuth flow for OpenAI Codex in `providers/openai_codex.py`
 - `session/` — session store + FTS5 search; SSE event streaming
 - `swarm/` — DAG orchestration. `presets/*.yaml` defines 29 multi-agent teams; `runtime.py` schedules workers by topological layer (parallel within layer, serial between layers) on a background daemon thread
-- `tools/` — 21 agent tools wired into the registry (also surfaced as MCP tools); `path_utils.py` enforces sandbox roots
+- `tools/` — agent tools wired into the registry (also surfaced as MCP tools); `path_utils.py` enforces sandbox roots
+- `integrations/indmoney/` — read-only MCP **client** of `mcp.indmoney.com/mcp` for live portfolio (holdings, totals, sector/asset-class breakdowns). Powers the `indmoney_holdings` and `indmoney_sync` agent tools. See [`docs/indmoney.md`](docs/indmoney.md) before changing anything here — most design choices are reactions to upstream surprises
 - `skills/<category>/<skill>/SKILL.md` — 74 skills in 8 categories (`data-source`, `strategy`, `analysis`, `asset-class`, `crypto`, `flow`, `tool`, plus risk)
 - `shadow_account/` — Jinja2 templates for the shadow-account HTML/PDF reports
 - `memory/` — persistent cross-session memory backing the `remember` tool
@@ -165,3 +170,4 @@ Triggers bull/bear debate → risk review → PM final call with a structured re
 - `TIMEOUT_SECONDS` — LLM call timeout (default 120)
 - `TOKEN_THRESHOLD` — agent context auto-compact threshold (default 40000)
 - `VIBE_TRADING_ENABLE_SHELL_TOOLS`, `VIBE_TRADING_ALLOWED_FILE_ROOTS`, `VIBE_TRADING_ALLOWED_RUN_ROOTS` — sandbox opt-ins
+- `INDMONEY_MCP_URL`, `INDMONEY_TOKEN_URL`, `INDMONEY_ASSET_TYPES` (default `IND_STOCK,US_STOCK,MF`), `INDMONEY_HOLDINGS_TTL_SECONDS` (default 900), `VIBE_TRADING_ENABLE_INDMONEY` — INDMoney integration. Tokens at `~/.vibe-trading/indmoney/{token,client}.json` (mode 0600)
