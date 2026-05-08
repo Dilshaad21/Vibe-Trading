@@ -46,6 +46,12 @@ class IndMoneyClient:
         http: ``httpx.Client`` (injectable for tests). Reuse one client per
             tool invocation so Cloudflare cookies and TLS state stay sticky.
         token_endpoint: OAuth token URL for refresh.
+        client_id: OAuth client id obtained at registration. INDMoney's
+            token endpoint is a confidential client per RFC 6749 §2.3.1
+            (``token_endpoint_auth_methods_supported``: ``client_secret_post``,
+            ``client_secret_basic``) — refresh requests must include both
+            ``client_id`` and ``client_secret`` or the endpoint rejects them.
+        client_secret: OAuth client secret obtained at registration.
         backoff_seconds: Backoff between 5xx retries.
     """
 
@@ -56,12 +62,16 @@ class IndMoneyClient:
         token_cache: TokenCache,
         http: httpx.Client,
         token_endpoint: str,
+        client_id: str,
+        client_secret: str,
         backoff_seconds: float = 2.0,
     ) -> None:
         self.url = url
         self.tokens = token_cache
         self.http = http
         self.token_endpoint = token_endpoint
+        self.client_id = client_id
+        self.client_secret = client_secret
         self.backoff_seconds = backoff_seconds
         self._ids = itertools.count(1)
 
@@ -116,7 +126,12 @@ class IndMoneyClient:
     def _refresh_http(self, refresh_token: str) -> dict[str, Any]:
         resp = self.http.post(
             self.token_endpoint,
-            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            },
         )
         resp.raise_for_status()
         return resp.json()

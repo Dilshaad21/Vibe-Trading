@@ -23,7 +23,9 @@ def _seed_token(tmp_path: Path) -> TokenCache:
     return cache
 
 
-def _make_client(tmp_path: Path, handler) -> IndMoneyClient:
+def _make_client(tmp_path: Path, handler, *,
+                 client_id: str = "cid_test",
+                 client_secret: str = "csec_test") -> IndMoneyClient:
     transport = httpx.MockTransport(handler)
     http = httpx.Client(transport=transport, base_url="https://mcp.indmoney.com")
     return IndMoneyClient(
@@ -31,6 +33,8 @@ def _make_client(tmp_path: Path, handler) -> IndMoneyClient:
         token_cache=_seed_token(tmp_path),
         http=http,
         token_endpoint="https://mcp.indmoney.com/oauth/token",
+        client_id=client_id,
+        client_secret=client_secret,
     )
 
 
@@ -116,11 +120,12 @@ def test_call_tool_falls_back_to_plain_json_when_no_sse_framing(tmp_path: Path):
 
 
 def test_call_tool_401_then_refresh_then_retry(tmp_path: Path):
-    state = {"calls": 0, "refresh_calls": 0}
+    state = {"calls": 0, "refresh_calls": 0, "refresh_body": b""}
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/oauth/token"):
             state["refresh_calls"] += 1
+            state["refresh_body"] = bytes(request.content)
             return httpx.Response(200, json={"access_token": "acc_new", "refresh_token": "ref_new", "expires_in": 3600})
         state["calls"] += 1
         if state["calls"] == 1:
@@ -131,11 +136,20 @@ def test_call_tool_401_then_refresh_then_retry(tmp_path: Path):
             "result": {"content": [{"type": "json", "json": {"ok": True}}]},
         })
 
-    client = _make_client(tmp_path, handler)
+    client = _make_client(tmp_path, handler,
+                          client_id="cid_xyz", client_secret="csec_xyz")
     result = client.call_tool("get_holdings", {})
     assert result == {"ok": True}
     assert state["refresh_calls"] == 1
     assert state["calls"] == 2
+    # INDMoney is a confidential client (token_endpoint_auth_methods_supported
+    # = client_secret_post / _basic). The refresh POST must include the
+    # client_id and client_secret or the token endpoint rejects it.
+    body = state["refresh_body"].decode("utf-8")
+    assert "client_id=cid_xyz" in body
+    assert "client_secret=csec_xyz" in body
+    assert "grant_type=refresh_token" in body
+    assert "refresh_token=ref_ok" in body
 
 
 def test_call_tool_401_then_refresh_fails_raises(tmp_path: Path):

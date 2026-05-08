@@ -19,11 +19,15 @@ from src.integrations.indmoney.auth import Token, TokenCache
 
 @pytest.fixture(autouse=True)
 def _isolate(tmp_path, monkeypatch):
-    """Redirect uploads root + token path to a tmp dir."""
+    """Redirect uploads root + token path + client-credentials path to tmp."""
     monkeypatch.setenv("VIBE_TRADING_ALLOWED_FILE_ROOTS", str(tmp_path))
     monkeypatch.setattr(
         "src.integrations.indmoney.auth.DEFAULT_TOKEN_PATH",
         tmp_path / "token.json",
+    )
+    monkeypatch.setattr(
+        "src.integrations.indmoney.auth.DEFAULT_CLIENT_PATH",
+        tmp_path / "client.json",
     )
     cache = TokenCache(path=tmp_path / "token.json")
     cache.save(Token(
@@ -31,6 +35,10 @@ def _isolate(tmp_path, monkeypatch):
         expires_at=int(time.time()) + 3600,
         account_id="acct1", issued_at=int(time.time()),
     ))
+    (tmp_path / "client.json").write_text(json.dumps({
+        "client_id": "cid_test",
+        "client_secret": "csec_test",
+    }))
 
 
 def _stub_transport(responses: dict[str, dict[str, Any]]) -> httpx.MockTransport:

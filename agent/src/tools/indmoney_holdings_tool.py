@@ -10,7 +10,12 @@ from typing import Any
 from src.agent.tools import BaseTool
 from src.integrations.indmoney import ErrorKind, build_error
 from src.integrations.indmoney.audit import append_audit
-from src.integrations.indmoney.auth import StaleTokenError, TokenCache
+from src.integrations.indmoney.auth import (
+    ClientCredentials,
+    ClientCredentialsMissingError,
+    StaleTokenError,
+    TokenCache,
+)
 from src.integrations.indmoney.cache import SnapshotCache
 from src.integrations.indmoney.client import (
     IndMoneyClient,
@@ -94,11 +99,17 @@ class IndMoneyHoldingsTool(BaseTool):
         if cached is not None:
             return json.dumps({"ok": True, **cached, "from_cache": True})
 
+        try:
+            creds = ClientCredentials.load()
+        except ClientCredentialsMissingError as exc:
+            return json.dumps(build_error(ErrorKind.NEEDS_AUTH, str(exc)))
+
         import httpx
         with httpx.Client(timeout=30.0) as http:
             client = IndMoneyClient(
                 url=DEFAULT_URL, token_cache=tokens, http=http,
                 token_endpoint=DEFAULT_TOKEN_URL,
+                client_id=creds.client_id, client_secret=creds.client_secret,
             )
             try:
                 with cache.lock(token.account_id):

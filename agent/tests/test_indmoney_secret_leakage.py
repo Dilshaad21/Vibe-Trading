@@ -19,12 +19,20 @@ def _isolate(tmp_path, monkeypatch):
         "src.integrations.indmoney.auth.DEFAULT_TOKEN_PATH",
         tmp_path / "token.json",
     )
+    monkeypatch.setattr(
+        "src.integrations.indmoney.auth.DEFAULT_CLIENT_PATH",
+        tmp_path / "client.json",
+    )
     TokenCache(path=tmp_path / "token.json").save(Token(
         access_token="SECRET-DO-NOT-LEAK",
         refresh_token="REFRESH-DO-NOT-LEAK",
         expires_at=int(time.time()) + 3600,
         account_id="acct1", issued_at=int(time.time()),
     ))
+    (tmp_path / "client.json").write_text(json.dumps({
+        "client_id": "cid_test",
+        "client_secret": "csec_test",
+    }))
 
 
 def _patch_httpx_client(monkeypatch, transport: httpx.MockTransport) -> None:
