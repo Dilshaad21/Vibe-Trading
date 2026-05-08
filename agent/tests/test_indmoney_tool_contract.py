@@ -72,20 +72,38 @@ def _patch_httpx_client(monkeypatch, transport: httpx.MockTransport) -> None:
 
 def test_holdings_tool_happy_path(monkeypatch, tmp_path):
     transport = _stub_transport({
-        "get_holdings": {"asof": "2026-05-07T14:30:00+05:30",
-                          "positions": [{"symbol": "AAPL", "name": "Apple",
-                                         "quantity": 1, "avg_cost": 1, "market_value": 2,
-                                         "unrealized_pnl": 1, "currency": "USD",
-                                         "instrument_type": "equity"}]},
-        "get_account": {"asof": "2026-05-07T14:30:00+05:30",
-                         "cash_usd": 100.0, "cash_inr": 0, "pending_settlement_usd": 0},
+        "networth_snapshot": {
+            "total_invested": 100.0, "total_current_value": 200.0,
+            "total_networth": 200.0,
+            "investments": [
+                {"asset_type": "US_STOCK", "current_value": 200.0, "invested_value": 100.0},
+            ],
+            "assets": [
+                {"assetclass_l2": "Liquid", "current_value": 50.0, "invested_value": 50.0},
+            ],
+            "sector": [],
+        },
+        "networth_holdings": {
+            "holdings": [{
+                "investment_code": "100001", "investment": "Example US Equity",
+                "asset_type": "US_STOCK", "assetclass_l2": "Global Equity",
+                "invested_amount": 100.0, "market_value": 200.0,
+                "total_pnl": 100.0, "total_units": 1.0, "unit_price": 200.0,
+            }],
+        },
     })
     from src.tools.indmoney_holdings_tool import IndMoneyHoldingsTool
     _patch_httpx_client(monkeypatch, transport)
+    monkeypatch.setenv("INDMONEY_ASSET_TYPES", "US_STOCK")
     out = json.loads(IndMoneyHoldingsTool().execute(force_refresh=True))
     assert out["ok"] is True
-    assert out["holdings"][0]["symbol"] == "AAPL"
-    assert out["cash"]["cash_usd"] == 100.0
+    # Symbol = INDMoney's investment_code (no ticker resolution in v1).
+    assert out["holdings"][0]["symbol"] == "100001"
+    assert out["holdings"][0]["currency"] == "INR"
+    # Liquid assetclass surfaces as cash_inr; cash_usd is always 0 from this MCP.
+    assert out["cash"]["cash_inr"] == 50.0
+    assert out["cash"]["cash_usd"] == 0.0
+    assert out["totals"]["total_current_value"] == 200.0
     assert "snapshot_path" in out
 
 
