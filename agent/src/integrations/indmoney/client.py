@@ -94,7 +94,7 @@ class IndMoneyClient:
         if resp.status_code != 200:
             raise UpstreamError(f"INDMoney {resp.status_code}: {resp.text[:200]}")
 
-        body = resp.json()
+        body = _parse_mcp_response_body(resp.text)
         if "error" in body:
             raise UpstreamError(f"INDMoney RPC error: {body['error']}")
         return _unwrap_tools_call_result(body.get("result", {}))
@@ -120,6 +120,36 @@ class IndMoneyClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+
+def _parse_mcp_response_body(text: str) -> dict[str, Any]:
+    """Parse an MCP HTTP response body, accepting either plain JSON or SSE.
+
+    ``mcp.indmoney.com`` returns 200 responses as Server-Sent Events with a
+    single ``event: message`` carrying one or more ``data:`` lines that
+    concatenate into the JSON-RPC payload. We try plain JSON first (cheap)
+    and fall back to extracting and joining the ``data:`` lines.
+    """
+    text = text.strip()
+    if not text:
+        raise UpstreamError("INDMoney returned an empty body")
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass  # try SSE path below
+    data_lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.rstrip("\r")
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    if not data_lines:
+        raise UpstreamError(f"INDMoney response is neither JSON nor SSE: {text[:200]!r}")
+    joined = "\n".join(data_lines)
+    try:
+        return json.loads(joined)
+    except json.JSONDecodeError as exc:
+        raise UpstreamError(f"INDMoney SSE data line is not JSON: {exc}") from exc
 
 
 def _unwrap_tools_call_result(result: dict[str, Any]) -> dict[str, Any]:

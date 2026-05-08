@@ -49,6 +49,49 @@ def test_call_tool_happy_path(tmp_path: Path):
     assert result == {"positions": []}
 
 
+def test_call_tool_handles_sse_framed_response(tmp_path: Path):
+    """mcp.indmoney.com returns 200s as Server-Sent Events:
+    `event: message\\ndata: {jsonrpc...}\\n\\n`. The client must
+    parse the data: line, not call resp.json() on the SSE body."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        sse = (
+            "event: message\n"
+            "data: " + json.dumps({
+                "jsonrpc": "2.0", "id": body["id"],
+                "result": {"content": [{"type": "text",
+                                          "text": '{"positions": [{"investment_code": "112192"}]}'}]},
+            }) + "\n\n"
+        )
+        return httpx.Response(
+            200,
+            content=sse.encode("utf-8"),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    client = _make_client(tmp_path, handler)
+    result = client.call_tool("networth_holdings", {"asset_type": "US_STOCK"})
+    assert result == {"positions": [{"investment_code": "112192"}]}
+
+
+def test_call_tool_falls_back_to_plain_json_when_no_sse_framing(tmp_path: Path):
+    """If the upstream returns plain JSON (no event:/data: framing), the
+    client must still parse it — the parser is tolerant either way."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": body["id"],
+                   "result": {"content": [{"type": "json", "json": {"ok": True}}]}},
+        )
+
+    client = _make_client(tmp_path, handler)
+    result = client.call_tool("networth_snapshot", {})
+    assert result == {"ok": True}
+
+
 def test_call_tool_401_then_refresh_then_retry(tmp_path: Path):
     state = {"calls": 0, "refresh_calls": 0}
 
