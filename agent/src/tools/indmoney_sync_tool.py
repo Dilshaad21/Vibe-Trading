@@ -1,8 +1,15 @@
-"""IndMoney sync tool — refresh holdings + cash + recent transactions in one call."""
+"""IndMoney sync tool — force-refresh the holdings cache.
+
+In v2 this collapses to "refresh the holdings snapshot". Earlier
+revisions also pulled transaction history, but INDMoney's MCP does not
+expose any transaction stream (no `get_transactions` tool, no analog),
+so the transactions branch was dropped. The tool name is kept for
+registry-stability reasons — anything that wired up `indmoney_sync`
+keeps working with the new behavior.
+"""
 
 from __future__ import annotations
 
-import datetime as _dt
 import json
 from typing import Any
 
@@ -16,29 +23,20 @@ from src.tools.indmoney_holdings_tool import (
     gate_ok,
     root_for_uploads,
 )
-from src.tools.indmoney_transactions_tool import IndMoneyTransactionsTool
-
-
-def _default_since() -> str:
-    return (_dt.date.today() - _dt.timedelta(days=30)).isoformat()
 
 
 class IndMoneySyncTool(BaseTool):
     name = "indmoney_sync"
     description = (
-        "Force-refresh INDMoney holdings + cash + recent transactions in one call. "
-        "Use after broker activity to bring caches up to date."
+        "Force-refresh the INDMoney holdings cache. Calls "
+        "networth_snapshot + networth_holdings per configured asset type, "
+        "writes a fresh snapshot, and prunes snapshots older than 30 days."
     )
     is_readonly = True
     repeatable = True
     parameters = {
         "type": "object",
-        "properties": {
-            "include_transactions_since": {
-                "type": "string",
-                "description": "ISO date YYYY-MM-DD; default: 30 days ago.",
-            },
-        },
+        "properties": {},
         "required": [],
     }
 
@@ -53,26 +51,16 @@ class IndMoneySyncTool(BaseTool):
         if token is None:
             return json.dumps(build_error(
                 ErrorKind.NEEDS_AUTH,
-                "Run: vibe-trading indmoney login",
+                "Run: python scripts/indmoney_oauth.py",
                 auth_url=None,
             ))
-
-        since = str(kwargs.get("include_transactions_since") or _default_since())
-        today = _dt.date.today().isoformat()
 
         holdings_out = json.loads(
             IndMoneyHoldingsTool().execute(force_refresh=True)
         )
         if not holdings_out.get("ok"):
-            return json.dumps({**holdings_out, "status": holdings_out.get("error_kind", "error")})
-
-        txns_out = json.loads(
-            IndMoneyTransactionsTool().execute(
-                start_date=since, end_date=today, force_refresh=True,
-            )
-        )
-        if not txns_out.get("ok"):
-            return json.dumps({**txns_out, "status": txns_out.get("error_kind", "error")})
+            return json.dumps({**holdings_out,
+                                "status": holdings_out.get("error_kind", "error")})
 
         cache = SnapshotCache(root=root_for_uploads())
         pruned = cache.prune(max_age_days=30)
@@ -80,16 +68,14 @@ class IndMoneySyncTool(BaseTool):
                      account=token.account_id, action="sync",
                      outcome="ok",
                      detail=f"holdings={len(holdings_out['holdings'])} "
-                            f"txns={txns_out['count']} pruned={pruned}")
+                            f"pruned={pruned}")
 
         return json.dumps({
             "ok": True,
             "status": "ok",
             "asof": holdings_out.get("asof", ""),
             "holdings_count": len(holdings_out["holdings"]),
-            "transactions_count": txns_out["count"],
             "snapshot_path": holdings_out["snapshot_path"],
-            "transactions_csv": txns_out["csv_path"],
-            "events_csv": txns_out["events_csv_path"],
+            "totals": holdings_out.get("totals", {}),
             "pruned_files": pruned,
         })

@@ -1741,40 +1741,31 @@ def cmd_provider_login(provider: str) -> int:
 
 
 def cmd_indmoney_login() -> int:
-    """Run interactive OAuth for INDMoney via oauth-cli-kit."""
-    try:
-        from oauth_cli_kit import login_oauth_interactive
-    except ImportError:
-        console.print("[red]oauth-cli-kit is not installed.[/red] Run: pip install oauth-cli-kit")
-        return EXIT_USAGE_ERROR
-    try:
-        console.print("[cyan]Starting INDMoney OAuth login...[/cyan]\n")
-        # Provider config (issuer, client_id, scopes, authorization_endpoint,
-        # token_endpoint) is captured in the discovery notes from Task 0:
-        # docs/superpowers/specs/2026-05-07-indmoney-discovery-notes.md.
-        # If oauth-cli-kit's built-in providers don't include INDMoney, the
-        # fallback is to roll Authorization Code + PKCE directly with httpx
-        # (RFC 6749 §4.1 + RFC 7636) — see plan Task 11 for the sketch.
-        token = login_oauth_interactive(
-            provider="indmoney",
-            print_fn=lambda text: console.print(text),
-            prompt_fn=lambda text: Prompt.ask(text),
-        )
-        if not token or not getattr(token, "access", None):
-            console.print("[red]Authentication did not return a token.[/red]")
-            return EXIT_RUN_FAILED
+    """Run interactive OAuth for INDMoney via the bundled helper script.
 
-        from src.integrations.indmoney.auth import Token, TokenCache
-        import time as _time
-        TokenCache().save(Token(
-            access_token=token.access,
-            refresh_token=getattr(token, "refresh", "") or "",
-            expires_at=int(_time.time()) + int(getattr(token, "expires_in", 3600) or 3600),
-            account_id=getattr(token, "account_id", "") or "default",
-            issued_at=int(_time.time()),
-        ))
-        console.print(f"[green]Authenticated with INDMoney[/green]  [dim]{getattr(token, 'account_id', 'default')}[/dim]")
-        return EXIT_SUCCESS
+    Delegates to ``scripts/indmoney_oauth.py``, which:
+      1. Hits the RFC 9728 protected-resource metadata at mcp.indmoney.com
+         to discover the authorization-server endpoints.
+      2. Performs Dynamic Client Registration (RFC 7591) to obtain a
+         client_id + client_secret without a pre-issued static client.
+      3. Drives Authorization Code + PKCE (RFC 6749 §4.1 + RFC 7636) via
+         a temporary 127.0.0.1:8765 callback listener.
+      4. Persists tokens (TokenCache) and client credentials separately.
+
+    We don't use ``oauth-cli-kit`` because INDMoney isn't in its provider
+    list and the mandatory PKCE + dynamic-registration flow is small
+    enough to implement directly.
+    """
+    import subprocess
+    from pathlib import Path as _Path
+
+    script = _Path(__file__).resolve().parent.parent / "scripts" / "indmoney_oauth.py"
+    if not script.exists():
+        console.print(f"[red]OAuth helper not found at {script}[/red]")
+        return EXIT_RUN_FAILED
+    console.print("[cyan]Starting INDMoney OAuth login...[/cyan]\n")
+    try:
+        return subprocess.call([sys.executable, str(script)])
     except Exception as exc:
         console.print(f"[red]Authentication error:[/red] {exc}")
         return EXIT_RUN_FAILED

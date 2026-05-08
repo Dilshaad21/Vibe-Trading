@@ -46,6 +46,12 @@ class IndMoneyClient:
         http: ``httpx.Client`` (injectable for tests). Reuse one client per
             tool invocation so Cloudflare cookies and TLS state stay sticky.
         token_endpoint: OAuth token URL for refresh.
+        client_id: OAuth client id obtained at registration. INDMoney's
+            token endpoint is a confidential client per RFC 6749 §2.3.1
+            (``token_endpoint_auth_methods_supported``: ``client_secret_post``,
+            ``client_secret_basic``) — refresh requests must include both
+            ``client_id`` and ``client_secret`` or the endpoint rejects them.
+        client_secret: OAuth client secret obtained at registration.
         backoff_seconds: Backoff between 5xx retries.
     """
 
@@ -56,12 +62,16 @@ class IndMoneyClient:
         token_cache: TokenCache,
         http: httpx.Client,
         token_endpoint: str,
+        client_id: str,
+        client_secret: str,
         backoff_seconds: float = 2.0,
     ) -> None:
         self.url = url
         self.tokens = token_cache
         self.http = http
         self.token_endpoint = token_endpoint
+        self.client_id = client_id
+        self.client_secret = client_secret
         self.backoff_seconds = backoff_seconds
         self._ids = itertools.count(1)
 
@@ -94,7 +104,7 @@ class IndMoneyClient:
         if resp.status_code != 200:
             raise UpstreamError(f"INDMoney {resp.status_code}: {resp.text[:200]}")
 
-        body = resp.json()
+        body = _parse_mcp_response_body(resp.text)
         if "error" in body:
             raise UpstreamError(f"INDMoney RPC error: {body['error']}")
         return _unwrap_tools_call_result(body.get("result", {}))
@@ -116,19 +126,64 @@ class IndMoneyClient:
     def _refresh_http(self, refresh_token: str) -> dict[str, Any]:
         resp = self.http.post(
             self.token_endpoint,
-            data={"grant_type": "refresh_token", "refresh_token": refresh_token},
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            },
         )
         resp.raise_for_status()
         return resp.json()
+
+
+def _parse_mcp_response_body(text: str) -> dict[str, Any]:
+    """Parse an MCP HTTP response body, accepting either plain JSON or SSE.
+
+    ``mcp.indmoney.com`` returns 200 responses as Server-Sent Events with a
+    single ``event: message`` carrying one or more ``data:`` lines that
+    concatenate into the JSON-RPC payload. We try plain JSON first (cheap)
+    and fall back to extracting and joining the ``data:`` lines.
+    """
+    text = text.strip()
+    if not text:
+        raise UpstreamError("INDMoney returned an empty body")
+    if text.startswith("{"):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass  # try SSE path below
+    data_lines: list[str] = []
+    for raw in text.splitlines():
+        line = raw.rstrip("\r")
+        if line.startswith("data:"):
+            data_lines.append(line[5:].lstrip())
+    if not data_lines:
+        raise UpstreamError(f"INDMoney response is neither JSON nor SSE: {text[:200]!r}")
+    joined = "\n".join(data_lines)
+    try:
+        return json.loads(joined)
+    except json.JSONDecodeError as exc:
+        raise UpstreamError(f"INDMoney SSE data line is not JSON: {exc}") from exc
 
 
 def _unwrap_tools_call_result(result: dict[str, Any]) -> dict[str, Any]:
     """Pull the JSON payload out of an MCP tools/call response.
 
     MCP tools/call returns ``{"content": [{"type": "json", "json": {...}}]}``
-    (or "text" content). We unwrap to the bare dict for callers.
+    or ``{"content": [{"type": "text", "text": "<JSON>"}]}``. When the
+    upstream tool failed, the same envelope arrives with ``isError: true``
+    and an error message in the text content — we raise ``UpstreamError``
+    rather than handing the error string back as data.
     """
     content = result.get("content", [])
+    if result.get("isError"):
+        message = ""
+        for item in content:
+            if item.get("type") == "text" and "text" in item:
+                message = item["text"]
+                break
+        raise UpstreamError(f"INDMoney tool error: {message or '<no message>'}")
     for item in content:
         if item.get("type") == "json" and "json" in item:
             return item["json"]

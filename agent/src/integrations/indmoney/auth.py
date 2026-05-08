@@ -21,10 +21,62 @@ from pathlib import Path
 from typing import Any, Callable
 
 DEFAULT_TOKEN_PATH = Path("~/.vibe-trading/indmoney/token.json").expanduser()
+DEFAULT_CLIENT_PATH = Path("~/.vibe-trading/indmoney/client.json").expanduser()
 
 
 class StaleTokenError(RuntimeError):
     """Raised when a refresh attempt fails. The on-disk token is untouched."""
+
+
+class ClientCredentialsMissingError(RuntimeError):
+    """Raised when client_id / client_secret aren't on disk yet.
+
+    INDMoney's token endpoint requires confidential-client auth, so the
+    client credentials produced by Dynamic Client Registration must be
+    persisted before any token refresh can succeed. The OAuth helper
+    script (``scripts/indmoney_oauth.py``) writes these to
+    ``DEFAULT_CLIENT_PATH``.
+    """
+
+
+@dataclass(frozen=True)
+class ClientCredentials:
+    """OAuth confidential-client credentials produced by Dynamic Client
+    Registration (RFC 7591). Loaded from a JSON file written by the OAuth
+    helper script. Persisted alongside the token so refresh works.
+    """
+
+    client_id: str
+    client_secret: str
+
+    @classmethod
+    def load(cls, path: Path | None = None) -> "ClientCredentials":
+        """Read client credentials from disk.
+
+        Raises ``ClientCredentialsMissingError`` if the file is absent or
+        missing one of the two required fields.
+        """
+        p = Path(path) if path else DEFAULT_CLIENT_PATH
+        if not p.exists():
+            raise ClientCredentialsMissingError(
+                f"INDMoney client credentials not found at {p}. "
+                "Run: python scripts/indmoney_oauth.py"
+            )
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception as exc:
+            raise ClientCredentialsMissingError(
+                f"INDMoney client credentials at {p} are unreadable: {exc}"
+            ) from exc
+        cid = data.get("client_id")
+        secret = data.get("client_secret")
+        if not cid or not secret:
+            raise ClientCredentialsMissingError(
+                f"INDMoney client credentials at {p} are incomplete "
+                "(missing client_id or client_secret). Re-run "
+                "scripts/indmoney_oauth.py"
+            )
+        return cls(client_id=cid, client_secret=secret)
 
 
 @dataclass(frozen=True)

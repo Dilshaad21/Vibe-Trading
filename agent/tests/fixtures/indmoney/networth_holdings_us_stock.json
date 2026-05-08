@@ -1,0 +1,37 @@
+{
+  "_note": "Sanitized real shape captured from networth_holdings(asset_type=US_STOCK) against indmcp/1.27.0 on 2026-05-08. Investment names are placeholders; codes are example IDs; monetary values rounded; structure and field names preserved.",
+  "holdings": [
+    {
+      "investment_code": "100001",
+      "investment": "Example US Equity One",
+      "asset_type": "US_STOCK",
+      "assetclass_l2": "Global Equity",
+      "invested_amount": 30000.0,
+      "market_value": 32000.0,
+      "holding_percent": 9.14,
+      "total_pnl": 2000.0,
+      "pnl_per": 6.67,
+      "xirr": 0,
+      "total_units": 0.5,
+      "unit_price": 64000.0,
+      "broker": "INDmoney",
+      "market_cap": "Large Cap"
+    },
+    {
+      "investment_code": "100002",
+      "investment": "Example US Equity Two",
+      "asset_type": "US_STOCK",
+      "assetclass_l2": "Global Equity",
+      "invested_amount": 25000.0,
+      "market_value": 24000.0,
+      "holding_percent": 6.86,
+      "total_pnl": -1000.0,
+      "pnl_per": -4.0,
+      "xirr": 0,
+      "total_units": 1.5,
+      "unit_price": 16000.0,
+      "broker": "INDmoney",
+      "market_cap": "Mid Cap"
+    }
+  ]
+}

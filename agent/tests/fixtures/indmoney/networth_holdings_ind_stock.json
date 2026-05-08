@@ -1,0 +1,21 @@
+{
+  "_note": "Sanitized example for networth_holdings(asset_type=IND_STOCK). Real investment names replaced with placeholders.",
+  "holdings": [
+    {
+      "investment_code": "200001",
+      "investment": "Example IND Equity One",
+      "asset_type": "IND_STOCK",
+      "assetclass_l2": "Indian Equity",
+      "invested_amount": 0,
+      "market_value": 1500000.0,
+      "holding_percent": 55.0,
+      "total_pnl": 1500000.0,
+      "pnl_per": 0,
+      "xirr": 0,
+      "total_units": 100.0,
+      "unit_price": 15000.0,
+      "broker": "INDmoney",
+      "market_cap": "Large Cap"
+    }
+  ]
+}
