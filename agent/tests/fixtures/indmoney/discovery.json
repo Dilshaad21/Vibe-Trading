@@ -1,0 +1,31 @@
+{
+  "oauth_metadata": null,
+  "protected_resource_metadata": null,
+  "initialize_status": 401,
+  "initialize_headers": {
+    "date": "Fri, 08 May 2026 10:30:52 GMT",
+    "content-type": "application/json",
+    "content-length": "74",
+    "connection": "keep-alive",
+    "server": "cloudflare",
+    "www-authenticate": "Bearer error=\"invalid_token\", error_description=\"Authentication required\", resource_metadata=\"https://mcp.indmoney.com/.well-known/oauth-protected-resource\"",
+    "x-request-id": "<redacted>",
+    "cf-cache-status": "DYNAMIC",
+    "set-cookie": "<redacted>",
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "x-content-type-options": "nosniff",
+    "cf-ray": "<redacted>"
+  },
+  "initialize_body": {
+    "error": "invalid_token",
+    "error_description": "Authentication required"
+  },
+  "tools_list": null,
+  "_probe_metadata": {
+    "probed_at_utc": "2026-05-08T10:30:52Z",
+    "probed_url": "https://mcp.indmoney.com/mcp",
+    "auth_token_present": false,
+    "well_known_oauth_authorization_server_status": "DNS_ERROR (httpx GET resolution failed in probe environment; POST to same host succeeded)",
+    "well_known_oauth_protected_resource_status": "DNS_ERROR (same as above; advertised via WWW-Authenticate but not fetched by this run)"
+  }
+}
