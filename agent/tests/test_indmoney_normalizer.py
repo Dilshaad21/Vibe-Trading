@@ -6,8 +6,6 @@ import csv
 import json
 from pathlib import Path
 
-import pytest
-
 from src.integrations.indmoney.normalizer import (
     normalize_cash,
     normalize_holdings,
@@ -15,7 +13,7 @@ from src.integrations.indmoney.normalizer import (
     write_events_csv,
     write_trades_csv,
 )
-from src.integrations.indmoney.types import CashSnapshot, Holding
+from src.integrations.indmoney.types import CashSnapshot
 from src.tools.trade_journal_parsers import (
     TradeRecord,
     load_dataframe,
