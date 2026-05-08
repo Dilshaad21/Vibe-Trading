@@ -12,6 +12,7 @@ import contextlib
 import json
 import logging
 import os
+import re as _re
 import time
 from pathlib import Path
 from typing import Any, Iterator
@@ -23,6 +24,15 @@ INDEX_FILE = ".index.json"
 AUDIT_FILE = "audit.log"
 
 _PROTECTED_FILES = {INDEX_FILE, AUDIT_FILE}
+
+_BAD_ACCT_RE = _re.compile(r"[^A-Za-z0-9._-]")
+
+
+def _safe_account(account: str) -> str:
+    """Reject account ids that could escape the cache dir as filenames."""
+    if not account or _BAD_ACCT_RE.search(account):
+        raise ValueError(f"Unsafe account id: {account!r}")
+    return account
 
 
 class SnapshotCache:
@@ -71,6 +81,7 @@ class SnapshotCache:
     def put(self, account: str, kind: str, key: str, value: dict[str, Any],
             ttl_seconds: int) -> Path:
         """Persist a snapshot and update the index. Returns the file path."""
+        account = _safe_account(account)
         if not self._index_loaded:
             self._load_index()
         self._ensure_dir()
@@ -113,6 +124,7 @@ class SnapshotCache:
     def lock(self, account: str, *, timeout_seconds: float = 30.0,
              stale_seconds: float = 30.0) -> Iterator[None]:
         """Per-account fetch lock. Reclaims locks older than ``stale_seconds``."""
+        account = _safe_account(account)
         self._ensure_dir()
         path = self.dir / f"{account}.lock"
         deadline = time.time() + timeout_seconds
