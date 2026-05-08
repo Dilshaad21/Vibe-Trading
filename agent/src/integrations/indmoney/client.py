@@ -156,9 +156,19 @@ def _unwrap_tools_call_result(result: dict[str, Any]) -> dict[str, Any]:
     """Pull the JSON payload out of an MCP tools/call response.
 
     MCP tools/call returns ``{"content": [{"type": "json", "json": {...}}]}``
-    (or "text" content). We unwrap to the bare dict for callers.
+    or ``{"content": [{"type": "text", "text": "<JSON>"}]}``. When the
+    upstream tool failed, the same envelope arrives with ``isError: true``
+    and an error message in the text content — we raise ``UpstreamError``
+    rather than handing the error string back as data.
     """
     content = result.get("content", [])
+    if result.get("isError"):
+        message = ""
+        for item in content:
+            if item.get("type") == "text" and "text" in item:
+                message = item["text"]
+                break
+        raise UpstreamError(f"INDMoney tool error: {message or '<no message>'}")
     for item in content:
         if item.get("type") == "json" and "json" in item:
             return item["json"]

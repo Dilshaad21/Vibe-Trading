@@ -75,6 +75,29 @@ def test_call_tool_handles_sse_framed_response(tmp_path: Path):
     assert result == {"positions": [{"investment_code": "112192"}]}
 
 
+def test_call_tool_raises_on_mcp_iserror_envelope(tmp_path: Path):
+    """When MCP returns {"content": [...], "isError": true}, the client
+    must raise UpstreamError instead of handing the error string back as
+    if it were data."""
+    from src.integrations.indmoney.client import UpstreamError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        return httpx.Response(200, json={
+            "jsonrpc": "2.0", "id": body["id"],
+            "result": {
+                "content": [{"type": "text",
+                             "text": "Error executing tool networth_holdings: 1 validation error"}],
+                "isError": True,
+            },
+        })
+
+    client = _make_client(tmp_path, handler)
+    with pytest.raises(UpstreamError) as exc_info:
+        client.call_tool("networth_holdings", {"asset_type": "STOCK"})
+    assert "validation error" in str(exc_info.value)
+
+
 def test_call_tool_falls_back_to_plain_json_when_no_sse_framing(tmp_path: Path):
     """If the upstream returns plain JSON (no event:/data: framing), the
     client must still parse it — the parser is tolerant either way."""
