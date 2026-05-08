@@ -67,7 +67,7 @@ Read/write tool batching: consecutive read-only tools execute in parallel via th
 - `swarm/` — DAG orchestration. `presets/*.yaml` defines 29 multi-agent teams; `runtime.py` schedules workers by topological layer (parallel within layer, serial between layers) on a background daemon thread
 - `tools/` — agent tools wired into the registry (also surfaced as MCP tools); `path_utils.py` enforces sandbox roots
 - `integrations/indmoney/` — read-only MCP **client** of `mcp.indmoney.com/mcp` for live portfolio (holdings, totals, sector/asset-class breakdowns). Powers the `indmoney_holdings` and `indmoney_sync` agent tools. See [`docs/indmoney.md`](docs/indmoney.md) before changing anything here — most design choices are reactions to upstream surprises
-- `skills/<category>/<skill>/SKILL.md` — 74 skills in 8 categories (`data-source`, `strategy`, `analysis`, `asset-class`, `crypto`, `flow`, `tool`, plus risk)
+- `skills/<category>/<skill>/SKILL.md` — 74 **project skills** in 8 categories (`data-source`, `strategy`, `analysis`, `asset-class`, `crypto`, `flow`, `tool`, plus risk). Loaded via the MCP tools `list_skills` / `load_skill` — NOT via Claude Code's built-in `Skill(...)` tool, which loads a different (plugin/superpower) skill registry. See "Skill namespaces" below if you're an agent connected to `vibe-trading-mcp`
 - `shadow_account/` — Jinja2 templates for the shadow-account HTML/PDF reports
 - `memory/` — persistent cross-session memory backing the `remember` tool
 
@@ -89,6 +89,19 @@ Several tools enforce path containment / sandbox roots — when adding or editin
 - Shell-capable tools are gated to the local CLI by default; remote API/MCP-SSE deployments must opt in with `VIBE_TRADING_ENABLE_SHELL_TOOLS=1`
 - `API_AUTH_KEY` is required for any non-loopback caller of the API server (and gated settings reads/writes)
 - Localhost dev workflows are intentionally low-friction — do not regress that ergonomics when tightening remote paths
+
+### Skill namespaces (project skills vs. Claude Code's `Skill` tool)
+
+Two unrelated systems both call themselves "skills" and they are easy to confuse — especially for an MCP client (Claude Code, Cursor, Claude Desktop) connected to `vibe-trading-mcp`. They live in separate registries:
+
+| System | Where it lives | How an agent invokes it |
+|---|---|---|
+| **Project skills** (this repo) | `agent/src/skills/<category>/<skill>/SKILL.md` — 74 finance/analysis playbooks (`fundamental-filter`, `risk-analysis`, `strategy-generate`, etc.) | MCP tool calls `list_skills()` and `load_skill(name="<skill>")` exposed by `agent/mcp_server.py` |
+| **Plugin/superpower skills** | Claude Code's installed plugins (`brainstorming`, `executing-plans`, `writing-plans`, etc.) | Claude Code's built-in `Skill(skill="<skill>")` tool |
+
+Common failure mode: an agent sees "load `fundamental-filter`" in context and reflexively calls `Skill(skill="fundamental-filter")`. That bounces with `Unknown skill: fundamental-filter` because it checked the plugin registry, not this project's skills. The fix is always `load_skill(name="fundamental-filter")` (the MCP tool), not `Skill(...)`.
+
+If you are an MCP-client agent and need a project skill: call `list_skills()` first to discover names, then `load_skill(name=...)` to pull the SKILL.md content. The SKILL.md will reference other MCP tools (`factor_analysis`, `web_search`, `backtest`, etc.) — call those directly the same way.
 
 ## Project conventions
 
