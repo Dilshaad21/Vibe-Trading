@@ -135,10 +135,13 @@ class IndMoneyHoldingsTool(BaseTool):
         }
         snap_path = cache.put(token.account_id, "holdings", "current",
                               snapshot, ttl_seconds=DEFAULT_HOLDINGS_TTL)
+        # Persist the snapshot path inside the cached value so subsequent
+        # cache hits return the same envelope shape as a fresh fetch.
+        snapshot["snapshot_path"] = str(snap_path)
+        cache.put(token.account_id, "holdings", "current",
+                  snapshot, ttl_seconds=DEFAULT_HOLDINGS_TTL)
         append_audit(cache.dir / "audit.log",
                      account=token.account_id, action="fetch_holdings",
                      outcome="ok",
                      detail=f"{len(holdings)} positions")
-        return json.dumps({"ok": True, **snapshot,
-                           "snapshot_path": str(snap_path),
-                           "from_cache": False})
+        return json.dumps({"ok": True, **snapshot, "from_cache": False})

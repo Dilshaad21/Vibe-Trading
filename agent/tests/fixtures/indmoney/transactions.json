@@ -1,4 +1,5 @@
 {
+  "_note": "Illustrative shape only — field names and structure are speculative pending the user's authenticated probe. See docs/superpowers/specs/2026-05-07-indmoney-discovery-notes.md sections 2-7.",
   "account_id": "TEST-ACC-001",
   "items": [
     {"datetime": "2026-04-01T10:00:00Z", "symbol": "AAPL", "name": "Apple Inc",

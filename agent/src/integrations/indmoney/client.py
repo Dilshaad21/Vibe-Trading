@@ -100,12 +100,17 @@ class IndMoneyClient:
         return _unwrap_tools_call_result(body.get("result", {}))
 
     def _post(self, payload: dict[str, Any], *, force_token: str | None = None) -> httpx.Response:
-        token = force_token or (self.tokens.load().access_token if self.tokens.load() else "")
+        if force_token:
+            token = force_token
+        else:
+            cached = self.tokens.load()
+            token = cached.access_token if cached else ""
         headers = {
-            "Authorization": f"Bearer {token}" if token else "",
             "content-type": "application/json",
             "accept": "application/json,text/event-stream",
         }
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         return self.http.post(self.url, content=json.dumps(payload), headers=headers)
 
     def _refresh_http(self, refresh_token: str) -> dict[str, Any]:
