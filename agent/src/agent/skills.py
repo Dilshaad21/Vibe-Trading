@@ -131,7 +131,7 @@ class SkillsLoader:
     # Display order for categories (unlisted categories appear at the end).
     _CATEGORY_ORDER = [
         "data-source", "strategy", "analysis", "asset-class",
-        "crypto", "flow", "tool", "other",
+        "crypto", "flow", "tool", "recipe", "other",
     ]
 
     def get_descriptions(self) -> str:
