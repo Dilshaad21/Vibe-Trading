@@ -741,6 +741,37 @@ def indmoney_sync() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Macro snapshot tool
+# ---------------------------------------------------------------------------
+#
+# Wrapper around the agent-side MacroSnapshotTool. As with the indmoney
+# tools, agent-registry membership alone does not expose a tool over MCP —
+# this @mcp.tool decorator is what makes macro_snapshot callable from
+# Claude Code / Cursor / Claude Desktop via vibe-trading-mcp. See
+# docs/superpowers/specs/2026-05-09-mcp-llm-boundary-design.md for the
+# integration overview and agent/src/integrations/macro/README.md for
+# data sources + failure handling.
+
+@mcp.tool
+def macro_snapshot(force_refresh: bool = False) -> str:
+    """Pull a current cross-asset macro snapshot.
+
+    Returns central-bank policy rates (Fed/ECB/BoE), US Treasury yields
+    (2Y/10Y/30Y) + 2s10s spread, FX (USD/INR, DXY, EUR/USD, USD/JPY),
+    and commodity benchmarks (Brent, WTI, gold). Sources are FRED public
+    CSV + yfinance — no API keys required. Cache TTL is 1 hour; pass
+    force_refresh=true to skip. Partial-failure tolerant: a missing
+    source surfaces in the _errors array while other fields stay
+    populated.
+
+    Args:
+        force_refresh: Skip the TTL cache and re-fetch from upstream.
+    """
+    registry = _get_registry()
+    return registry.execute("macro_snapshot", {"force_refresh": force_refresh})
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 

@@ -39,19 +39,20 @@ def test_indmoney_tools_have_openai_schema():
         assert "parameters" in schema["function"]
 
 
-def test_indmoney_tools_exposed_via_fastmcp_surface():
+def test_indmoney_and_macro_tools_exposed_via_fastmcp_surface():
     """REGRESSION GUARD: assert the FastMCP server actually advertises the
-    INDMoney tools. The earlier version of this test only checked the
-    in-process agent registry, which let the v2 PR ship without the
-    @mcp.tool wrappers. ``mcp.list_tools()`` is the public FastMCP API and
-    matches what an MCP client (e.g. Claude Code via vibe-trading-mcp)
-    actually sees on tools/list.
+    INDMoney tools AND the macro_snapshot tool. The earlier version of
+    this test only checked the in-process agent registry, which let the
+    indmoney v2 PR ship without @mcp.tool wrappers. ``mcp.list_tools()``
+    is the public FastMCP API and matches what an MCP client (e.g.
+    Claude Code via vibe-trading-mcp) actually sees on tools/list.
     """
     mcp_module = importlib.import_module("mcp_server")
     tools = asyncio.run(mcp_module.mcp.list_tools())
     names = {t.name for t in tools}
-    assert _INDMONEY_TOOLS <= names, (
-        f"INDMoney tools missing from FastMCP surface. Saw: {sorted(names)}"
+    expected = _INDMONEY_TOOLS | {"macro_snapshot"}
+    assert expected <= names, (
+        f"Required tools missing from FastMCP surface. Saw: {sorted(names)}"
     )
-    # And the dropped transactions tool must NOT have re-appeared.
+    # Sanity: dropped transactions tool must NOT have re-appeared.
     assert "indmoney_transactions" not in names
