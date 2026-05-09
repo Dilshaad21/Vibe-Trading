@@ -117,6 +117,19 @@ Common failure mode: an agent sees "load `fundamental-filter`" in context and re
 
 If you are an MCP-client agent and need a project skill: call `list_skills()` first to discover names, then `load_skill(name=...)` to pull the SKILL.md content. The SKILL.md will reference other MCP tools (`factor_analysis`, `web_search`, `backtest`, etc.) — call those directly the same way.
 
+### MCP / LLM boundary (when does a tool need a separate LLM?)
+
+Most `vibe-trading-mcp` tools are pure compute or data-fetch and work with no LLM provider configured — Claude Code (the MCP client) is the only LLM in the loop. The exception is `run_swarm`, whose workers spawn their own `ChatLLM` (`agent/src/swarm/worker.py:225`) and require `LANGCHAIN_PROVIDER` + `<PROVIDER>_API_KEY` env vars to function.
+
+| Tool / preset family | Needs LLM creds? | How to invoke from Claude Code |
+|---|---|---|
+| Data + math tools (`macro_snapshot`, `factor_analysis`, `analyze_options`, `pattern_recognition`, `backtest`, `analyze_trade_journal`, `indmoney_holdings`, `indmoney_sync`, etc.) | No | Direct MCP tool call |
+| Recipe skills (skills with `category: recipe` in their SKILL.md frontmatter) | No | `load_skill(name="<recipe-name>")`, then follow steps |
+| Data-heavy swarm presets (`macro_rates_fx_desk`, `portfolio_review_board`, `fundamental_research_team`, etc.) | Yes (workers each call ChatLLM) | **Prefer the corresponding recipe skill if one exists.** Fall back to `run_swarm` only after setting `LANGCHAIN_PROVIDER` + `<PROVIDER>_API_KEY`. |
+| Adversarial / multi-voice presets (`investment_committee`, `geopolitical_war_room`, `event_driven_task_force`, `sentiment_intelligence_team`, `social_alpha_team`) | Yes | These genuinely need multi-voice debate; recipes can't replicate them. Set the env vars to opt in. |
+
+Recipe skills are the canonical replacement for data-heavy swarm presets when running via MCP. See [`docs/mcp-feature-matrix.md`](docs/mcp-feature-matrix.md) for the full preset → recipe mapping (filled in over time as recipes are added).
+
 ## Project conventions
 
 From `CONTRIBUTING.md` (these are project-specific, not generic):
