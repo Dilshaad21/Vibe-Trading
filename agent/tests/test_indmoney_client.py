@@ -190,3 +190,61 @@ def test_call_tool_5xx_retries_once_then_upstream_error(tmp_path: Path):
     with pytest.raises(UpstreamError):
         client.call_tool("get_holdings", {})
     assert state["calls"] == 2
+
+
+def test_call_tool_retries_on_service_error_envelope(tmp_path: Path):
+    """INDMoney sometimes wraps backend errors (513 from /v1/holdings/) as
+    a 200 OK MCP response with no isError flag. The client must detect the
+    envelope and retry once before treating it as data."""
+    state = {"calls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        state["calls"] += 1
+        if state["calls"] == 1:
+            payload = {
+                "error": "service_error",
+                "message": "API returned 513: /v1/holdings/",
+                "tool": "networth_asset_holdings",
+                "service": "ind-memory",
+            }
+        else:
+            payload = {"holdings": [{"investment_code": "117123",
+                                       "investment": "CloudFlare Inc."}]}
+        return httpx.Response(200, json={
+            "jsonrpc": "2.0", "id": body["id"],
+            "result": {"content": [{"type": "json", "json": payload}]},
+        })
+
+    client = _make_client(tmp_path, handler)
+    client.backoff_seconds = 0  # don't sleep in the test
+    result = client.call_tool("networth_holdings", {"asset_type": "US_STOCK"})
+    assert state["calls"] == 2
+    assert result == {"holdings": [{"investment_code": "117123",
+                                      "investment": "CloudFlare Inc."}]}
+
+
+def test_call_tool_raises_upstream_error_on_persistent_service_error(tmp_path: Path):
+    from src.integrations.indmoney.client import UpstreamError
+
+    state = {"calls": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        state["calls"] += 1
+        return httpx.Response(200, json={
+            "jsonrpc": "2.0", "id": body["id"],
+            "result": {"content": [{"type": "json", "json": {
+                "error": "service_error",
+                "message": "API returned 513: /v1/holdings/",
+                "tool": "networth_asset_holdings",
+                "service": "ind-memory",
+            }}]},
+        })
+
+    client = _make_client(tmp_path, handler)
+    client.backoff_seconds = 0
+    with pytest.raises(UpstreamError) as exc_info:
+        client.call_tool("networth_holdings", {"asset_type": "US_STOCK"})
+    assert "513" in str(exc_info.value)
+    assert state["calls"] == 2
