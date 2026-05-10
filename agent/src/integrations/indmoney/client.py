@@ -76,8 +76,24 @@ class IndMoneyClient:
         self._ids = itertools.count(1)
 
     def call_tool(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
-        """Invoke ``tools/call`` and return the unwrapped JSON result."""
-        return self._rpc("tools/call", {"name": name, "arguments": arguments})
+        """Invoke ``tools/call`` and return the unwrapped JSON result.
+
+        Retries once on a service-error envelope (see
+        ``_is_service_error_envelope``), matching the existing HTTP 5xx
+        retry policy in ``_rpc``. INDMoney's ``/v1/holdings/`` backend
+        has been observed to return a transient 513 wrapped as a 200 OK
+        with this envelope; one retry after ``backoff_seconds`` clears
+        it in practice.
+        """
+        params = {"name": name, "arguments": arguments}
+        result = self._rpc("tools/call", params)
+        if _is_service_error_envelope(result):
+            time.sleep(self.backoff_seconds)
+            result = self._rpc("tools/call", params)
+            if _is_service_error_envelope(result):
+                msg = result.get("message") or result.get("error")
+                raise UpstreamError(f"INDMoney service error: {msg}")
+        return result
 
     def _rpc(self, method: str, params: dict[str, Any]) -> dict[str, Any]:
         payload = {"jsonrpc": "2.0", "id": next(self._ids),
@@ -135,6 +151,27 @@ class IndMoneyClient:
         )
         resp.raise_for_status()
         return resp.json()
+
+
+_SERVICE_ERROR_KEYS = frozenset({"error", "message", "service", "tool"})
+
+
+def _is_service_error_envelope(payload: Any) -> bool:
+    """Detect INDMoney's upstream service-error envelope.
+
+    Some backend errors (notably ``513`` from ``/v1/holdings/``) come
+    back as successful MCP responses *without* ``isError: true``:
+
+        {"error":   "service_error",
+         "message": "API returned 513: /v1/holdings/",
+         "tool":    "networth_asset_holdings",
+         "service": "ind-memory"}
+
+    Without this check, ``_unwrap_tools_call_result`` returns the error
+    dict as if it were a real payload, and downstream callers report
+    "no holdings" instead of surfacing the upstream outage.
+    """
+    return isinstance(payload, dict) and _SERVICE_ERROR_KEYS.issubset(payload.keys())
 
 
 def _parse_mcp_response_body(text: str) -> dict[str, Any]:
