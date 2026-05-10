@@ -7,6 +7,7 @@ _RECIPE_SKILLS = {
     "macro-rates-fx-analysis",
     "portfolio-rebalance",
     "equity-fundamental-deep-dive",
+    "portfolio-coach",
 }
 
 
