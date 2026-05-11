@@ -174,3 +174,91 @@ These hard rules override the synthesized signal regardless of weighted score. C
 | DOCN-style employer stock concentration >25% of net worth | Mandatory diversification (override any "add" recommendation) |
 
 If a trigger fires, note it in the **Triggers active now** section of the output and adjust the trade plan accordingly.
+
+### Step 5: Emit the strategy output
+
+Use the template matching the dispatched path. All three variants share the same top sections (dimensional readout, synthesis, monitoring, sources); the middle section differs.
+
+#### TICKER path output
+
+```markdown
+# Strategy: {TICKER} — {one-line headline with composite verdict}
+
+## Dimensional readout
+| Dimension | Signal | Confidence | Top evidence |
+|---|---|---|---|
+| Macro     | …      | …          | rate/FX/commodity bullet |
+| News      | …      | …          | earnings date / catalyst / latest rating |
+| Fundamental | …    | …          | PE / growth / ROE / FCF |
+| Technical | …      | …          | EMA / RSI / ADX / OBV |
+
+## Synthesis
+- Composite signal & confidence per horizon (short / medium / long).
+- Conflicts/tensions (1-2 lines, only if dimensions diverge).
+- Triggers firing right now (if any).
+
+## Trade plan — Short (1–4 weeks)
+- **Verdict:** {Buy / Hold / Trim / Sell} ({conviction})
+- **Entry trigger:** {price level or signal — e.g. "above $X on close" or "EMA(12) cross"}
+- **Position size:** {% of US book, $ amount}
+- **Stop-loss:** {price, % below entry}
+- **Exit condition:** {target price OR time-based OR signal-based}
+- **Top risk:** {single biggest thing that breaks the thesis}
+
+## Trade plan — Medium (1–6 months)
+…same six fields…
+
+## Trade plan — Long (1–3 years)
+…same six fields, but stop-loss is thesis-based not price-based…
+
+## Monitoring
+- **Daily:** 1-2 specific items to watch
+- **Weekly:** 1-2 specific items
+- **Monthly:** 1-2 specific items
+- **Re-run this skill when:** {specific trigger condition}
+
+## Sources
+- macro_snapshot fields cited inline above
+- web_search URLs (top 3-5)
+- get_market_data window: {start_date} → {end_date}
+```
+
+#### PORTFOLIO path output
+
+Same top (Dimensional readout, Synthesis) and bottom (Monitoring, Sources) sections. The "Trade plan" sections are replaced by **Book action plan** sections:
+
+```markdown
+## Book action plan — Short (1–4 weeks)
+- **Top-down stance:** sector tilts (e.g. "+5% to AI infrastructure, -3% to defensives"), cash deployment %, hedge needs.
+- **Bottom-up actions:**
+  | Ticker | Current weight | Action | Size delta | Reason |
+  | … | … | Add / Trim / Exit | … | one-line |
+- **Cash deployment phase plan:** if idle cash >10% of book, propose 2-3 tranche schedule.
+
+## Book action plan — Medium (1–6 months)
+…same three sections, medium-horizon tuning…
+
+## Book action plan — Long (1–3 years)
+…same three sections, long-horizon tuning…
+```
+
+#### THEME path output
+
+Same top and bottom sections. The "Trade plan" sections are replaced by **Theme expression plan** sections:
+
+```markdown
+## Theme expression plan — Short (1–4 weeks)
+- **Thesis:** one-line statement of the bull case for this theme.
+- **Counter-thesis:** one-line statement of what would invalidate it.
+- **Top names to express the theme (3-5):**
+  | Ticker | Why this name | Rationale | Position weight |
+  | … | … | … | … |
+- **Anti-thesis names (avoid / sell):** tickers that get hurt if the theme plays out, or that have already priced it in.
+- **Allocation envelope:** maximum % of book to allocate to this theme on this horizon (e.g. "≤8% of US book").
+
+## Theme expression plan — Medium (1–6 months)
+…same five fields…
+
+## Theme expression plan — Long (1–3 years)
+…same five fields…
+```
