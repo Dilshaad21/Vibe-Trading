@@ -171,7 +171,7 @@ These hard rules override the synthesized signal regardless of weighted score. C
 | Position already >12% of book | Cap further additions regardless of signal |
 | Stop-loss breached on an existing holding | Exit, do not average down |
 | Composite Bearish AND down >25% from cost | Exit, do not hope |
-| DOCN-style employer stock concentration >25% of net worth | Mandatory diversification (override any "add" recommendation) |
+| Employer stock concentration >25% of net worth | Mandatory diversification (override any "add" recommendation) |
 
 If a trigger fires, note it in the **Triggers active now** section of the output and adjust the trade plan accordingly.
 
