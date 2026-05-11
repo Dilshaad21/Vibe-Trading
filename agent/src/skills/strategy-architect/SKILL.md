@@ -262,3 +262,23 @@ Same top and bottom sections. The "Trade plan" sections are replaced by **Theme 
 ## Theme expression plan — Long (1–3 years)
 …same five fields…
 ```
+
+## Failure modes
+
+| Failure | Behavior |
+|---|---|
+| `macro_snapshot` returns `_errors` populated | Use the partial fields that succeeded, flag the gap in the dimensional readout, downgrade Macro confidence to Med/Low. Do not block synthesis. |
+| `indmoney_holdings` returns `error_kind: needs_auth` (PORTFOLIO path) | Switch to generic-framework mode. Tell the user: "Live portfolio data unavailable — run `python scripts/indmoney_oauth.py` for tailored recommendations." Continue with macro+theme-style guidance. |
+| `web_search` returns 0 results for a query | Note "no recent news surfaced" in the dimensional readout; downgrade News confidence to Low. Do NOT invent headlines. |
+| `get_market_data` returns fewer than 30 bars | Skip the technical composite. Mark Technical as "insufficient history" with Neutral signal and Low confidence. |
+| All four dimensions fail | Refuse to produce a strategy. Output: "Cannot construct a strategy — please retry with a different ticker/portfolio context, or check that the required MCP tools are reachable." |
+| Input genuinely ambiguous after one clarifying question | Default to TICKER path if any ticker was named anywhere in the conversation; otherwise default to PORTFOLIO. |
+
+## Anti-patterns (do NOT)
+
+- Do **not** produce a strategy from fewer than four dimensions. If a dimension can't be gathered, say so explicitly in the dimensional readout and reduce composite confidence — never silently drop a dimension.
+- Do **not** invent prices, P/E numbers, growth rates, or news headlines. If a value isn't returned by a tool, write "n/a" or "not available" and lower the relevant dimension's confidence.
+- Do **not** recommend a position size that violates `portfolio-coach` trigger limits (single position >12%, employer stock >25% of net worth, sector >35%, asset class >65%).
+- Do **not** chain to `load_skill` for other skills mid-flow. This skill is inline. If the user wants deeper specialist analysis after, point them to the right skill in the output — don't auto-load.
+- Do **not** produce price targets without citing the source (analyst note URL, technical level explanation, or derivation shown in the synthesis).
+- Do **not** produce a strategy without all three horizons (short / medium / long) — even if one horizon has Low confidence, emit it with that disclaimer rather than skip it.
