@@ -82,6 +82,7 @@ Output a markdown response with:
 | Strategy | "Build a multi-factor model" | `factor-research` (+ `multi-factor`) | IC / IR + ranking |
 | Performance | "What drove my returns?" | `performance-attribution` | Brinson decomposition |
 | Compliance | "Tax / regulatory rules for [market]?" | `regulatory-knowledge` | A-share / HK / US / crypto rules |
+| Full strategy | "Give me a full strategy on [TICKER / my book / theme]" / "Buy/hold/sell with conviction across all lenses" | `strategy-architect` | Multi-dimensional fused trade plan across macro / news / fundamentals / technicals, multi-horizon |
 
 **Default fallback:** if no row matches, route to `portfolio-rebalance` + `risk-analysis`.
 
