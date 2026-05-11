@@ -138,3 +138,39 @@ For **PORTFOLIO** path, run the composite on the top-5 holdings + an index proxy
 For **THEME** path, run the composite on the sector ETF (XLK, XLE, XLF, IBB, etc.) most representative of the theme.
 
 Confidence: **High** if ≥30 bars of data AND all 4 sub-indicators are unambiguous; **Med** if mixed sub-indicators; **Low** if <30 bars or `get_market_data` returns insufficient history.
+
+### Step 3: Synthesize signals into multi-horizon strategy
+
+Each dimension has returned a **signal** (Bullish / Neutral / Bearish) and **confidence** (High / Med / Low). Combine using **horizon-specific weights**:
+
+| Dimension | Short (1–4w) | Medium (1–6m) | Long (1–3y) |
+|---|---|---|---|
+| Technical | **40%** | 25% | 15% |
+| News / Catalyst | **30%** | 25% | 15% |
+| Macro | 20% | 25% | **30%** |
+| Fundamental | 10% | 25% | **40%** |
+
+**Composite signal per horizon:** weighted vote. Map signals to numeric values (Bullish = +1, Neutral = 0, Bearish = -1), multiply by horizon weight, sum. Result > +0.3 → Bullish; < -0.3 → Bearish; otherwise Neutral.
+
+**Composite confidence per horizon:**
+
+- All 4 dimensions agree (same signal) → **High**
+- 3 of 4 agree → **Medium**
+- 2 vs 2 split, or 3+ Neutral → **Low**
+
+**Conflict flag:** if any dimension diverges by >1 step from the composite (e.g. composite Bullish but Fundamental Bearish), surface this explicitly in the output. Tension between dimensions is where insight lives — name it, don't paper over it.
+
+### Step 4: Apply trigger overrides
+
+These hard rules override the synthesized signal regardless of weighted score. Check each before emitting the final trade plan.
+
+| Trigger | Override action |
+|---|---|
+| RSI > 80 on a position | Trim 25–35% even if composite is Bullish (parabolic) |
+| Earnings within 7 days AND composite Bullish | Defer new entries until post-print |
+| Position already >12% of book | Cap further additions regardless of signal |
+| Stop-loss breached on an existing holding | Exit, do not average down |
+| Composite Bearish AND down >25% from cost | Exit, do not hope |
+| DOCN-style employer stock concentration >25% of net worth | Mandatory diversification (override any "add" recommendation) |
+
+If a trigger fires, note it in the **Triggers active now** section of the output and adjust the trade plan accordingly.
