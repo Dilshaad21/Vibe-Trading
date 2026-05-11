@@ -8,6 +8,7 @@ _RECIPE_SKILLS = {
     "portfolio-rebalance",
     "equity-fundamental-deep-dive",
     "portfolio-coach",
+    "strategy-architect",
 }
 
 
