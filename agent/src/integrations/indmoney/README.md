@@ -51,12 +51,14 @@ python scripts/indmoney_oauth.py
   "asof": "",
   "account_id": "default",                     // INDMoney does not return a sub claim
   "asset_types": ["IND_STOCK","US_STOCK","MF"],
+  "currency":    "USD",                        // "USD" when conversion on (default), else "INR"
+  "usdinr_rate": 88.0,                          // INR per USD used for conversion; null if off
   "totals": {
-    "total_invested":      <INR>,
-    "total_current_value": <INR>,
-    "total_networth":      <INR>
+    "total_invested":      <USD|INR>,
+    "total_current_value": <USD|INR>,
+    "total_networth":      <USD|INR>
   },
-  "investments_by_asset_type": [...],          // verbatim from networth_snapshot
+  "investments_by_asset_type": [...],          // money fields converted when currency=="USD"
   "assets_by_class":          [...],
   "sector_breakdown":         [...],
   "holdings": [
@@ -64,17 +66,17 @@ python scripts/indmoney_oauth.py
       "symbol":         "<INDMoney investment_code, e.g. '112192'>",
       "name":           "<full company name>",
       "quantity":       <fractional units>,
-      "avg_cost":       <INR per unit>,
-      "market_value":   <INR>,
-      "unrealized_pnl": <INR>,
-      "currency":       "INR",                 // always — see Known limitations
+      "avg_cost":       <USD|INR per unit>,
+      "market_value":   <USD|INR>,
+      "unrealized_pnl": <USD|INR>,
+      "currency":       "USD",                 // matches top-level currency; see Known limitations
       "asset_class":    "us_equity"|"indian_equity"|"mf"|"other",
       "asof":           ""
     }
   ],
   "cash": {
-    "cash_usd":               0.0,             // INDMoney does not expose USD cash
-    "cash_inr":               <INR>,           // proxy: Liquid assetclass_l2 current_value
+    "cash_usd":               <USD>,           // Liquid proxy lands here when conversion on
+    "cash_inr":               <INR>,           // ...or here when conversion off
     "pending_settlement_usd": 0.0,
     "asof":                   ""
   },
@@ -128,11 +130,17 @@ account-statement CSV/PDF manually and feed it to `trade_journal_tool`.
    same MCP — not yet wired into Vibe-Trading) or maintain a manual
    mapping if you need to cross-reference yfinance prices.
 
-3. **Single-currency (INR) throughout.** Even US stock holdings are
-   priced in INR — INDMoney converts at the server. There is no
-   per-row currency field, no FX rate, no USD line. `Holding.currency`
-   is hard-coded to `"INR"` from this source. If you need USD-denominated
-   PnL, FX out-of-band.
+3. **Source is single-currency (INR); USD is converted out-of-band.**
+   Even US stock holdings are priced in INR — INDMoney converts at the
+   server and exposes no per-row currency field, no FX rate, no USD line.
+   To present USD, the tool fetches a USD/INR rate from Yahoo Finance
+   (`USDINR=X`, via `fx.get_usdinr_rate`) and divides the INR money
+   fields by it. Conversion is **on by default**; set
+   `INDMONEY_CONVERT_TO_USD=0` to keep raw INR, or pin the rate with
+   `INDMONEY_USDINR_RATE=<inr_per_usd>` (skips the live lookup). The
+   active rate and currency are echoed in the snapshot as `usdinr_rate`
+   and `currency`. Note the converted USD is an approximation: it uses a
+   single spot rate, not INDMoney's internal per-trade FX.
 
 4. **Remote-caller gate is best-effort.** `gate_ok()` in
    `indmoney_holdings_tool.py` checks `VIBE_TRADING_REMOTE_CALL=1`,

@@ -134,3 +134,51 @@ def test_normalize_networth_snapshot_missing_fields_defaults_to_zero():
     assert snap["total_networth"] == 0.0
     assert snap["investments"] == []
     assert snap["assets"] == []
+
+
+def test_normalize_holdings_default_currency_is_inr():
+    holdings = normalize_networth_holdings(
+        "US_STOCK", _load("networth_holdings_us_stock.json"))
+    assert all(h.currency == "INR" for h in holdings)
+
+
+def test_normalize_holdings_with_fx_rate_converts_to_usd():
+    rate = 80.0
+    inr = normalize_networth_holdings(
+        "US_STOCK", _load("networth_holdings_us_stock.json"))
+    usd = normalize_networth_holdings(
+        "US_STOCK", _load("networth_holdings_us_stock.json"), fx_rate=rate)
+    assert len(usd) == len(inr)
+    for i, u in zip(inr, usd):
+        assert u.currency == "USD"
+        # quantity is unitless and must not be scaled
+        assert u.quantity == i.quantity
+        assert u.market_value == pytest.approx(i.market_value / rate)
+        assert u.avg_cost == pytest.approx(i.avg_cost / rate)
+        assert u.unrealized_pnl == pytest.approx(i.unrealized_pnl / rate)
+
+
+def test_normalize_holdings_zero_or_negative_fx_rate_keeps_inr():
+    for bad in (0.0, -5.0):
+        holdings = normalize_networth_holdings(
+            "US_STOCK", _load("networth_holdings_us_stock.json"), fx_rate=bad)
+        assert all(h.currency == "INR" for h in holdings)
+
+
+def test_normalize_snapshot_with_fx_rate_converts_money_not_ratios():
+    rate = 80.0
+    snap = normalize_networth_snapshot(_load("networth_snapshot.json"), fx_rate=rate)
+    assert snap["currency"] == "USD"
+    assert snap["total_invested"] == pytest.approx(600000.0 / rate)
+    assert snap["total_current_value"] == pytest.approx(4000000.0 / rate)
+    by_class = {item["assetclass_l2"]: item for item in snap["assets"]}
+    assert by_class["Liquid"]["current_value"] == pytest.approx(700000.0 / rate)
+    # percentage/progress ratio fields must remain untouched by FX scaling.
+    raw_by_class = {
+        item["assetclass_l2"]: item
+        for item in _load("networth_snapshot.json").get("assets", [])
+    }
+    for key, row in by_class.items():
+        for ratio_key in ("return_percentage", "progress_value_percentage"):
+            if ratio_key in row:
+                assert row[ratio_key] == raw_by_class[key][ratio_key]

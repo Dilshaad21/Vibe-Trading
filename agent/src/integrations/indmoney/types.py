@@ -15,8 +15,9 @@ class Holding:
             non-US (".NS" / ".BO" for Indian; etc.).
         name: Human-readable instrument name.
         quantity: Filled quantity (fractional shares supported).
-        avg_cost: Cost basis per unit, in ``currency`` (NOT silently
-            FX-converted).
+        avg_cost: Cost basis per unit, in ``currency``. INDMoney sources are
+            INR natively; converted to USD only when an explicit ``fx_rate``
+            is supplied to the normalizer.
         market_value: Current value at fetch time, in ``currency``.
         unrealized_pnl: market_value - quantity*avg_cost, in ``currency``.
         currency: ISO-4217 code ("USD" / "INR").

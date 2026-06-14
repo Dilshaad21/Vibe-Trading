@@ -22,6 +22,7 @@ from src.integrations.indmoney.client import (
     RateLimitedError,
     UpstreamError,
 )
+from src.integrations.indmoney.fx import get_usdinr_rate
 from src.integrations.indmoney.normalizer import (
     normalize_networth_holdings,
     normalize_networth_snapshot,
@@ -36,6 +37,17 @@ DEFAULT_URL = os.getenv("INDMONEY_MCP_URL", "https://mcp.indmoney.com/mcp")
 # default of "/oauth/token" was a v1 guess that returned 403 on every refresh.
 DEFAULT_TOKEN_URL = os.getenv("INDMONEY_TOKEN_URL", "https://mcp.indmoney.com/token")
 DEFAULT_HOLDINGS_TTL = int(os.getenv("INDMONEY_HOLDINGS_TTL_SECONDS", "900"))
+
+
+def _convert_to_usd_enabled() -> bool:
+    """Whether to convert INDMoney's INR values to USD.
+
+    INDMoney returns everything in INR (including US stock prices). Conversion
+    is on by default; set ``INDMONEY_CONVERT_TO_USD=0`` to keep raw INR.
+    """
+    return os.getenv("INDMONEY_CONVERT_TO_USD", "1").strip().lower() not in (
+        "0", "false", "no", "",
+    )
 
 
 def _configured_asset_types() -> list[str]:
@@ -126,6 +138,9 @@ class IndMoneyHoldingsTool(BaseTool):
             return json.dumps(build_error(ErrorKind.NEEDS_AUTH, str(exc)))
 
         asset_types = _configured_asset_types()
+        # INDMoney returns INR; resolve a USD/INR rate up front so holdings and
+        # the snapshot convert consistently against the same number.
+        fx_rate = get_usdinr_rate() if _convert_to_usd_enabled() else None
         import httpx
         with httpx.Client(timeout=30.0) as http:
             client = IndMoneyClient(
@@ -153,7 +168,7 @@ class IndMoneyHoldingsTool(BaseTool):
                                 detail=str(exc),
                             )
                             continue
-                        for h in normalize_networth_holdings(at, payload):
+                        for h in normalize_networth_holdings(at, payload, fx_rate=fx_rate):
                             holdings.append(h.to_dict())
             except StaleTokenError as exc:
                 append_audit(cache.dir / "audit.log",
@@ -176,16 +191,19 @@ class IndMoneyHoldingsTool(BaseTool):
                 return json.dumps(build_error(ErrorKind.UPSTREAM_ERROR,
                                               f"Lock contention: {exc}"))
 
-        snapshot_norm = normalize_networth_snapshot(snapshot_raw)
+        snapshot_norm = normalize_networth_snapshot(snapshot_raw, fx_rate=fx_rate)
         # CashSnapshot from this MCP is essentially empty: INDMoney does not
         # expose a free-cash field. The "Liquid" assetclass_l2 in the snapshot
-        # is closest, but it includes FDs and savings, so we record it as
-        # cash_inr for downstream visibility while keeping cash_usd at 0.
+        # is closest, but it includes FDs and savings, so we record it for
+        # downstream visibility. When USD conversion is on, snapshot_norm rows
+        # are already in USD, so the Liquid value lands in cash_usd; otherwise
+        # it stays in cash_inr.
         liquid = next((a for a in snapshot_norm["assets"]
                        if a.get("assetclass_l2") == "Liquid"), {})
+        liquid_value = float(liquid.get("current_value", 0) or 0)
         cash = CashSnapshot(
-            cash_usd=0.0,
-            cash_inr=float(liquid.get("current_value", 0) or 0),
+            cash_usd=liquid_value if fx_rate is not None else 0.0,
+            cash_inr=0.0 if fx_rate is not None else liquid_value,
             pending_settlement_usd=0.0,
             asof="",
         )
@@ -193,6 +211,8 @@ class IndMoneyHoldingsTool(BaseTool):
             "asof": "",
             "account_id": token.account_id,
             "asset_types": asset_types,
+            "currency": snapshot_norm["currency"],
+            "usdinr_rate": fx_rate,
             "totals": {
                 "total_invested": snapshot_norm["total_invested"],
                 "total_current_value": snapshot_norm["total_current_value"],

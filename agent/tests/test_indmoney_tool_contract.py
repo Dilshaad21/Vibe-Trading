@@ -94,16 +94,63 @@ def test_holdings_tool_happy_path(monkeypatch, tmp_path):
     from src.tools.indmoney_holdings_tool import IndMoneyHoldingsTool
     _patch_httpx_client(monkeypatch, transport)
     monkeypatch.setenv("INDMONEY_ASSET_TYPES", "US_STOCK")
+    # Conversion is on by default; pin the USD/INR rate so the test is
+    # deterministic and never touches the network.
+    monkeypatch.setenv("INDMONEY_USDINR_RATE", "100")
+    import src.integrations.indmoney.fx as fx
+    fx._CACHE = None
     out = json.loads(IndMoneyHoldingsTool().execute(force_refresh=True))
     assert out["ok"] is True
     # Symbol = INDMoney's investment_code (no ticker resolution in v1).
     assert out["holdings"][0]["symbol"] == "100001"
+    # INDMoney sources INR; the tool converts to USD by default.
+    assert out["currency"] == "USD"
+    assert out["usdinr_rate"] == 100.0
+    assert out["holdings"][0]["currency"] == "USD"
+    assert out["holdings"][0]["market_value"] == 2.0  # 200 INR / 100
+    # Liquid assetclass surfaces as cash_usd once converted.
+    assert out["cash"]["cash_usd"] == 0.5  # 50 INR / 100
+    assert out["cash"]["cash_inr"] == 0.0
+    assert out["totals"]["total_current_value"] == 2.0  # 200 INR / 100
+    assert "snapshot_path" in out
+
+
+def test_holdings_tool_inr_when_conversion_disabled(monkeypatch, tmp_path):
+    transport = _stub_transport({
+        "networth_snapshot": {
+            "total_invested": 100.0, "total_current_value": 200.0,
+            "total_networth": 200.0,
+            "investments": [
+                {"asset_type": "US_STOCK", "current_value": 200.0, "invested_value": 100.0},
+            ],
+            "assets": [
+                {"assetclass_l2": "Liquid", "current_value": 50.0, "invested_value": 50.0},
+            ],
+            "sector": [],
+        },
+        "networth_holdings": {
+            "holdings": [{
+                "investment_code": "100001", "investment": "Example US Equity",
+                "asset_type": "US_STOCK", "assetclass_l2": "Global Equity",
+                "invested_amount": 100.0, "market_value": 200.0,
+                "total_pnl": 100.0, "total_units": 1.0, "unit_price": 200.0,
+            }],
+        },
+    })
+    from src.tools.indmoney_holdings_tool import IndMoneyHoldingsTool
+    _patch_httpx_client(monkeypatch, transport)
+    monkeypatch.setenv("INDMONEY_ASSET_TYPES", "US_STOCK")
+    monkeypatch.setenv("INDMONEY_CONVERT_TO_USD", "0")
+    out = json.loads(IndMoneyHoldingsTool().execute(force_refresh=True))
+    assert out["ok"] is True
+    assert out["currency"] == "INR"
+    assert out["usdinr_rate"] is None
     assert out["holdings"][0]["currency"] == "INR"
-    # Liquid assetclass surfaces as cash_inr; cash_usd is always 0 from this MCP.
+    assert out["holdings"][0]["market_value"] == 200.0
+    # Liquid assetclass surfaces as cash_inr; cash_usd is 0 when not converting.
     assert out["cash"]["cash_inr"] == 50.0
     assert out["cash"]["cash_usd"] == 0.0
     assert out["totals"]["total_current_value"] == 200.0
-    assert "snapshot_path" in out
 
 
 def test_holdings_tool_needs_auth_when_no_token(monkeypatch, tmp_path):
