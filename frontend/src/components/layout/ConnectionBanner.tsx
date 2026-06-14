@@ -1,5 +1,5 @@
+import { useTranslation } from 'react-i18next';
 import { WifiOff, RefreshCw } from "lucide-react";
-import { useI18n } from "@/lib/i18n";
 import type { SSEStatus } from "@/hooks/useSSE";
 
 interface Props {
@@ -8,7 +8,7 @@ interface Props {
 }
 
 export function ConnectionBanner({ status, retryAttempt }: Props) {
-  const { t } = useI18n();
+  const { t } = useTranslation();
   if (status === "connected" || status === "disconnected") return null;
 
   return (
@@ -16,12 +16,12 @@ export function ConnectionBanner({ status, retryAttempt }: Props) {
       {status === "reconnecting" ? (
         <>
           <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-          <span>{t.reconnectingN.replace("{n}", String(retryAttempt || 1))}</span>
+          <span>{t('connection.reconnecting', { attempt: retryAttempt || 1 })}</span>
         </>
       ) : (
         <>
           <WifiOff className="h-3.5 w-3.5" />
-          <span>{t.disconnected}</span>
+          <span>{t('connection.disconnected')}</span>
         </>
       )}
     </div>

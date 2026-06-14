@@ -11,16 +11,25 @@ from __future__ import annotations
 import importlib
 import json
 import logging
+import re as _re
 import sys
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
-logger = logging.getLogger(__name__)
-
+from backtest.loaders.rsshub_events import (
+    FeedSpec,
+    RSSHubEventProvider,
+    enrich_price_frames_with_events,
+    feed_specs_from_config,
+)
+from backtest.loaders.tushare_fundamentals import (
+    TushareFundamentalProvider,
+    enrich_price_frames_with_fundamentals,
+)
 from backtest.metrics import (
     by_exit_reason_stats,
     by_symbol_stats,
@@ -28,10 +37,26 @@ from backtest.metrics import (
 )
 from backtest.models import EquitySnapshot, Position, TradeRecord
 
+logger = logging.getLogger(__name__)
+
+
+def _run_card_data_sources(config: Dict[str, Any], loader: Any) -> List[str]:
+    """Return source names for run-card evidence."""
+    configured = config.get("_run_card_effective_sources")
+    if isinstance(configured, list):
+        return [str(source) for source in configured if str(source).strip()]
+    if isinstance(configured, str) and configured.strip():
+        return [configured.strip()]
+
+    loader_name = getattr(loader, "name", None)
+    if loader_name:
+        return [str(loader_name)]
+
+    source = config.get("source")
+    return [str(source)] if source else []
+
 
 # ─── Market detection (lightweight, for signal alignment only) ───
-
-import re as _re
 
 _CRYPTO_RE = _re.compile(r"^[A-Z]+-USDT$|^[A-Z]+/USDT$", _re.I)
 _FOREX_RE = _re.compile(r"^[A-Z]{3}/[A-Z]{3}$|^[A-Z]{6}\.FX$")
@@ -89,7 +114,7 @@ def _align(
         logger.warning("Symbols dropped (no usable price data): %s", all_nan_cols)
         codes = [c for c in codes if c not in all_nan_cols]
         if not codes:
-            raise ValueError(f"All symbols have no data in the requested date range")
+            raise ValueError("All symbols have no data in the requested date range")
         close = close[codes]
 
     pos = pd.DataFrame(0.0, index=dates, columns=codes)
@@ -130,6 +155,98 @@ def _load_optimizer(config: Dict[str, Any]) -> Optional[Callable]:
     except (ImportError, AttributeError) as e:
         print(f"[WARN] Failed to load optimizer '{opt_name}': {e}, falling back to equal weight")
         return None
+
+
+def _normalise_fundamental_fields(config: Dict[str, Any]) -> dict[str, list[str]]:
+    """Read the optional statement-table field map from backtest config."""
+    raw_fields = config.get("fundamental_fields")
+    if raw_fields in (None, {}):
+        return {}
+    if not isinstance(raw_fields, dict):
+        raise ValueError("fundamental_fields must map table names to field-name lists")
+
+    normalized: dict[str, list[str]] = {}
+    for table, fields in raw_fields.items():
+        if not isinstance(table, str) or not table.strip():
+            raise ValueError("fundamental_fields table names must be non-empty strings")
+        if fields is None:
+            continue
+        if isinstance(fields, str) or not isinstance(fields, Iterable):
+            raise ValueError(f"fundamental_fields[{table!r}] must be a list of field names")
+
+        field_list = list(fields)
+        if not field_list:
+            continue
+        invalid = [field for field in field_list if not isinstance(field, str) or not field.strip()]
+        if invalid:
+            raise ValueError(f"fundamental_fields[{table!r}] contains invalid field names")
+        normalized[table.strip()] = field_list
+    return normalized
+
+
+def _maybe_enrich_fundamentals(
+    data_map: Dict[str, pd.DataFrame],
+    config: Dict[str, Any],
+) -> Dict[str, pd.DataFrame]:
+    """Attach configured Tushare statement fields before signal generation."""
+    fields_by_table = _normalise_fundamental_fields(config)
+    if not fields_by_table:
+        return data_map
+
+    try:
+        provider = TushareFundamentalProvider()
+        return enrich_price_frames_with_fundamentals(
+            data_map,
+            provider,
+            fields_by_table,
+            as_of=config.get("end_date", ""),
+            periods=config.get("fundamental_periods"),
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"fundamental_fields requested but Tushare enrichment failed: {exc}"
+        ) from exc
+
+
+def _event_feed_specs(config: Dict[str, Any]) -> List[FeedSpec]:
+    """Parse the optional ``event_feeds`` feed definitions from backtest config.
+
+    ``event_feeds`` is a list of feed-definition dicts (there is no built-in
+    catalogue) — each with ``name``/``route_template``/``event_type`` and an
+    optional ``code_style``. An empty/absent value means "no event enrichment".
+    """
+    raw_feeds = config.get("event_feeds")
+    if raw_feeds in (None, [], {}):
+        return []
+    if not isinstance(raw_feeds, (list, tuple)):
+        raise ValueError("event_feeds must be a list of feed definitions")
+    return feed_specs_from_config(raw_feeds)
+
+
+def _maybe_enrich_events(
+    data_map: Dict[str, pd.DataFrame],
+    config: Dict[str, Any],
+) -> Dict[str, pd.DataFrame]:
+    """Attach a point-in-time-safe ``event_score`` column before signal generation."""
+    specs = _event_feed_specs(config)
+    if not specs:
+        return data_map
+
+    try:
+        provider = RSSHubEventProvider(feeds=specs)
+        if not provider.is_available():
+            raise RuntimeError(f"RSSHub base URL not configured (set ${'RSSHUB_BASE_URL'})")
+        return enrich_price_frames_with_events(
+            data_map,
+            provider,
+            as_of=config.get("end_date", ""),
+            decay_lambda=float(config.get("event_decay_lambda", 0.1)),
+            lookback=int(config.get("event_lookback", 30)),
+        )
+    except Exception as exc:
+        raise RuntimeError(
+            f"event_feeds requested but RSSHub enrichment failed: {exc}"
+        ) from exc
 
 
 # ─── Base Engine ───
@@ -277,9 +394,25 @@ class BaseEngine(ABC):
         if not data_map:
             print(json.dumps({"error": "No data fetched"}))
             sys.exit(1)
+        data_map = _maybe_enrich_fundamentals(data_map, config)
+        data_map = _maybe_enrich_events(data_map, config)
 
         # 2. Generate signals
         signal_map = signal_engine.generate(data_map)
+        if not isinstance(signal_map, dict):
+            print(json.dumps({"error": (
+                f"SignalEngine.generate() must return Dict[str, pd.Series], "
+                f"got {type(signal_map).__name__}. "
+                "Return a dict mapping symbol codes to pandas Series of signals."
+            )}))
+            sys.exit(1)
+        for _code, _sig in signal_map.items():
+            if not isinstance(_sig, pd.Series):
+                print(json.dumps({"error": (
+                    f"SignalEngine.generate() returned {type(_sig).__name__} for '{_code}', "
+                    "expected pd.Series. Each value must be a pandas Series with DatetimeIndex."
+                )}))
+                sys.exit(1)
         valid_codes = sorted(c for c in signal_map if c in data_map)
         if not valid_codes:
             print(json.dumps({"error": "No valid signals generated"}))
@@ -303,6 +436,7 @@ class BaseEngine(ABC):
             index=[s.timestamp for s in self.equity_snapshots],
         )
         bench_ret = ret_df.mean(axis=1) if ret_df.shape[1] > 0 else pd.Series(0.0, index=dates)
+        benchmark_metadata = {}
 
         # ── External benchmark fetch ──────────────────────────────────────────
         bench_ticker = config.get("benchmark")
@@ -318,15 +452,17 @@ class BaseEngine(ABC):
             )
             if bench_result is not None:
                 bench_ret = bench_result.ret_series.reindex(dates).fillna(0.0)
-                bench_equity = self.initial_capital * (1 + bench_ret).cumprod()
-                m["benchmark_ticker"] = bench_result.ticker
-                m["benchmark_return"]  = bench_result.total_ret
+                benchmark_metadata = {
+                    "benchmark_ticker": bench_result.ticker,
+                    "benchmark_return": bench_result.total_ret,
+                }
         # ── External benchmark fetch ──────────────────────────────────────────
 
         bench_equity = self.initial_capital * (1 + bench_ret).cumprod()
 
         # 6. Metrics
         m = calc_metrics(equity_series, self.trades, self.initial_capital, bars_per_year, bench_ret)
+        m.update(benchmark_metadata)
         m["by_symbol"] = by_symbol_stats(self.trades)
         m["by_exit_reason"] = by_exit_reason_stats(self.trades)
 
@@ -345,6 +481,16 @@ class BaseEngine(ABC):
         self._write_artifacts(
             run_dir, data_map, dates, equity_series, bench_equity, bench_ret,
             target_pos, m, valid_codes,
+        )
+
+        # 9. Trust Layer run card
+        from backtest.run_card import write_run_card
+        write_run_card(
+            run_dir,
+            config,
+            m,
+            data_sources=_run_card_data_sources(config, loader),
+            strategy_path=run_dir / "code" / "signal_engine.py",
         )
 
         # Print scalar metrics (skip nested dicts for JSON compat)

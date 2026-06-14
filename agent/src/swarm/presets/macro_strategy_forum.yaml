@@ -50,7 +50,7 @@ agents:
     tools: [bash, read_file, write_file, load_skill, read_url]
     skills: [global-macro, web-reader, geopolitical-risk]
     max_iterations: 50
-    timeout_seconds: 600
+    timeout_seconds: 1800
     max_retries: 1
 
   - id: domestic_economist
@@ -98,10 +98,10 @@ agents:
       7. **Policy surprise scenarios** — Upside/downside policy shock and elasticity of {market}
 
       Prefer fresh macro data via Tushare patterns; every judgment needs a data hook.
-    tools: [bash, read_file, write_file, load_skill, read_url]
+    tools: [bash, read_file, write_file, load_skill, get_market_data, read_url]
     skills: [macro-analysis, tushare]
     max_iterations: 50
-    timeout_seconds: 600
+    timeout_seconds: 1800
     max_retries: 1
 
   - id: policy_analyst
@@ -152,7 +152,7 @@ agents:
     tools: [bash, read_file, write_file, load_skill, read_url]
     skills: [regulatory-knowledge, sector-rotation, web-reader]
     max_iterations: 50
-    timeout_seconds: 600
+    timeout_seconds: 1800
     max_retries: 1
 
   - id: chief_strategist
@@ -198,7 +198,7 @@ agents:
     tools: [bash, read_file, write_file, load_skill]
     skills: [asset-allocation, macro-analysis]
     max_iterations: 50
-    timeout_seconds: 600
+    timeout_seconds: 1800
     max_retries: 1
 
 tasks:

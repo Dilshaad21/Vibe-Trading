@@ -37,6 +37,28 @@ def test_remote_write_requires_api_key_when_key_unset() -> None:
     assert "API_AUTH_KEY" in response.json()["detail"]
 
 
+def test_remote_goal_endpoints_require_api_key_when_key_unset() -> None:
+    client = _remote_client()
+
+    cases = [
+        ("post", "/sessions/abcdef012345/goal", {"objective": "Evaluate NVDA", "criteria": ["Define thesis"]}),
+        ("get", "/sessions/abcdef012345/goal", None),
+        (
+            "post",
+            "/sessions/abcdef012345/goal/evidence",
+            {
+                "goal_id": "goal_123",
+                "expected_goal_id": "goal_123",
+                "text": "Evidence",
+            },
+        ),
+    ]
+    for method, path, body in cases:
+        kwargs = {"json": body} if body is not None else {}
+        response = getattr(client, method)(path, **kwargs)
+        assert response.status_code == 403, f"{method.upper()} {path}"
+
+
 def test_local_dev_write_allowed_when_key_unset() -> None:
     response = _local_client().post("/sessions", json={})
 
@@ -84,6 +106,7 @@ def test_configured_api_key_required_for_sensitive_reads(
     for path in [
         "/runs",
         "/sessions",
+        "/sessions/abcdef012345/goal",
         "/swarm/runs",
     ]:
         response = client.get(path)
@@ -102,6 +125,29 @@ def test_configured_api_key_accepts_bearer_for_sensitive_reads(
     )
 
     assert response.status_code == 200
+
+
+def test_loopback_bypasses_auth_even_when_api_key_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Loopback clients are always trusted — the API key only gates remote access."""
+    monkeypatch.setenv("API_AUTH_KEY", "secret")
+    monkeypatch.setattr(api_server, "_API_KEY", "secret")
+
+    local = _local_client()
+    remote = _remote_client()
+
+    # Loopback: no bearer needed → should succeed
+    local_response = local.get("/runs")
+    assert local_response.status_code == 200
+
+    # Remote without bearer: still rejected
+    remote_response = remote.get("/runs")
+    assert remote_response.status_code == 401
+
+    # Remote with bearer: accepted
+    remote_bearer = remote.get("/runs", headers={"Authorization": "Bearer secret"})
+    assert remote_bearer.status_code == 200
 
 
 def test_configured_api_key_required_for_session_event_stream(
@@ -167,3 +213,123 @@ def test_cors_origins_accept_explicit_remote_origins() -> None:
     origins = api_server._parse_cors_origins(" https://app.example.com,https://admin.example.com ")
 
     assert origins == ["https://app.example.com", "https://admin.example.com"]
+
+
+# ============================================================================
+# Path-parameter validation (run_id / session_id)
+# ============================================================================
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        # Real formats produced by the codebase.
+        "20260105_120342_12_a1b2c3",            # state.create_run_dir
+        "swarm-20260105_120342-a1b2c3",         # swarm presets.run_id
+        "abcdef012345",                         # session_id (uuid.uuid4().hex[:12])
+        "run-1",
+        "A" * 128,
+    ],
+)
+def test_validate_path_param_accepts_known_good_values(value: str) -> None:
+    api_server._validate_path_param(value, "run_id")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "",
+        "..",
+        "../etc",
+        "foo/bar",
+        "foo\\bar",
+        "foo bar",
+        "foo.bar",             # dot is not in the safe class
+        "foo\n",
+        "foo\r",
+        "foo\t",
+        "foo\x00bar",
+        "A" * 129,
+    ],
+)
+def test_validate_path_param_rejects_traversal_inputs(value: str) -> None:
+    with pytest.raises(api_server.HTTPException) as excinfo:
+        api_server._validate_path_param(value, "run_id")
+
+    assert excinfo.value.status_code == 400
+    assert "run_id" in excinfo.value.detail
+
+
+def test_get_run_code_rejects_dot_run_id() -> None:
+    response = _local_client().get("/runs/../code")
+
+    # Either rejected at routing (404) or by the validator (400). Both are safe;
+    # what we forbid is reading code from outside RUNS_DIR.
+    assert response.status_code in {400, 404}
+
+
+def test_get_run_pine_rejects_traversal_run_id() -> None:
+    response = _local_client().get("/runs/foo.bar/pine")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid run_id"
+
+
+def test_get_run_pine_rejects_url_encoded_newline_run_id() -> None:
+    response = _local_client().get("/runs/foo%0A/pine")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid run_id"
+
+
+def test_get_run_result_rejects_traversal_run_id() -> None:
+    response = _local_client().get("/runs/foo.bar")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid run_id"
+
+
+def test_session_endpoints_reject_traversal_session_id() -> None:
+    client = _local_client()
+
+    cases = [
+        ("get", "/sessions/foo.bar", None),
+        ("delete", "/sessions/foo.bar", None),
+        ("patch", "/sessions/foo.bar", {"title": "x"}),
+        ("post", "/sessions/foo.bar/messages", {"content": "x"}),
+        ("get", "/sessions/foo.bar/messages", None),
+        ("post", "/sessions/foo.bar/cancel", None),
+        ("post", "/sessions/foo.bar/goal", {"objective": "x", "criteria": ["y"]}),
+        ("get", "/sessions/foo.bar/goal", None),
+        (
+            "post",
+            "/sessions/foo.bar/goal/evidence",
+            {"goal_id": "goal_123", "expected_goal_id": "goal_123", "text": "x"},
+        ),
+    ]
+    for method, path, body in cases:
+        kwargs = {"json": body} if body is not None else {}
+        response = getattr(client, method)(path, **kwargs)
+        assert response.status_code == 400, f"{method.upper()} {path} should be rejected"
+        assert response.json()["detail"] == "invalid session_id"
+
+
+def test_session_event_stream_rejects_traversal_session_id() -> None:
+    response = _local_client().get("/sessions/foo.bar/events")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "invalid session_id"
+
+
+def test_swarm_run_endpoints_reject_traversal_run_id() -> None:
+    client = _local_client()
+
+    for method, path in (
+        ("get", "/swarm/runs/foo.bar"),
+        ("get", "/swarm/runs/foo.bar/events"),
+        ("post", "/swarm/runs/foo.bar/cancel"),
+        ("post", "/swarm/runs/foo.bar/retry"),
+    ):
+        response = getattr(client, method)(path)
+        assert response.status_code == 400, f"{method.upper()} {path} should be rejected"
+        assert response.json()["detail"] == "invalid run_id"

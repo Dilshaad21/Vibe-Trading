@@ -29,7 +29,7 @@ class SSEEvent:
         timestamp: Event timestamp.
     """
 
-    event_id: str = field(default_factory=lambda: uuid.uuid4().hex[:16])
+    event_id: Optional[str] = field(default_factory=lambda: uuid.uuid4().hex[:16])
     event_type: str = "message"
     data: Dict[str, Any] = field(default_factory=dict)
     session_id: str = ""
@@ -42,13 +42,15 @@ class SSEEvent:
             Text that conforms to the SSE specification.
         """
         payload = json.dumps(self.data, ensure_ascii=False)
-        lines = [
-            f"id: {self.event_id}",
+        lines = []
+        if self.event_id:
+            lines.append(f"id: {self.event_id}")
+        lines.extend([
             f"event: {self.event_type}",
             f"data: {payload}",
             "",
             "",
-        ]
+        ])
         return "\n".join(lines)
 
 
@@ -146,20 +148,29 @@ class EventBus:
         self.publish(event)
         return event
 
-    def replay(self, session_id: str, last_event_id: Optional[str] = None) -> List[SSEEvent]:
+    def replay(
+        self,
+        session_id: str,
+        last_event_id: Optional[str] = None,
+        *,
+        replay_all: bool = False,
+    ) -> List[SSEEvent]:
         """Replay buffered session events for reconnect recovery.
 
         Args:
             session_id: Session ID.
             last_event_id: Last event ID received by the client.
+            replay_all: Return the buffered stream from the beginning when
+                ``last_event_id`` is absent. Used only for active run recovery;
+                completed history is loaded through REST.
 
         Returns:
             List of events that should be replayed.
         """
-        if not last_event_id:
-            return []  # First connect: history loaded via REST, no replay needed
         with self._lock:
             buffer = self._buffers.get(session_id, [])
+            if not last_event_id:
+                return list(buffer) if replay_all else []  # First connect: history loaded via REST by default.
             found = False
             result: List[SSEEvent] = []
             for event in buffer:
@@ -167,18 +178,24 @@ class EventBus:
                     result.append(event)
                 elif event.event_id == last_event_id:
                     found = True
+            if not found and replay_all:
+                return list(buffer)
             return result
 
     async def subscribe(
         self,
         session_id: str,
         last_event_id: Optional[str] = None,
+        *,
+        replay_all: bool = False,
     ) -> AsyncIterator[SSEEvent]:
         """Subscribe to a session event stream asynchronously.
 
         Args:
             session_id: Session ID.
             last_event_id: Last event ID received by the client for reconnect recovery.
+            replay_all: Replay all buffered events when no last event ID is
+                available. This is opt-in for active run hydration.
 
         Yields:
             SSEEvent objects.
@@ -191,7 +208,7 @@ class EventBus:
             self._subscribers[session_id].append(queue)
 
         try:
-            replay_events = self.replay(session_id, last_event_id)
+            replay_events = self.replay(session_id, last_event_id, replay_all=replay_all)
             for event in replay_events:
                 yield event
 
@@ -201,6 +218,7 @@ class EventBus:
                     yield event
                 except asyncio.TimeoutError:
                     yield SSEEvent(
+                        event_id=None,
                         event_type="heartbeat",
                         data={"ts": time.time()},
                         session_id=session_id,

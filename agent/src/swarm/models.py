@@ -1,6 +1,6 @@
 """Swarm multi-agent system — data models.
 
-All Pydantic models defined here, shared by store / task_store / mailbox / worker / runtime.
+All Pydantic models defined here, shared by store / task_store / worker / runtime.
 Enums use str+Enum to ensure JSON-serialization compatibility.
 """
 
@@ -38,6 +38,23 @@ class RunStatus(str, Enum):
     completed = "completed"
     failed = "failed"
     cancelled = "cancelled"
+
+
+class WorkerStatus(str, Enum):
+    """Terminal status a worker returns.
+
+    ``incomplete`` is distinct from ``failed``: the worker ran without an
+    exception but produced no substantive deliverable (plan-only stub,
+    fabricated/mock numbers, unparsed tool markup, or a data agent that
+    made no tool call and wrote no report). It must never be folded into
+    ``completed`` (see P01/P03).
+    """
+
+    completed = "completed"
+    failed = "failed"
+    timeout = "timeout"
+    token_limit = "token_limit"
+    incomplete = "incomplete"
 
 
 class SwarmAgentSpec(BaseModel):
@@ -105,37 +122,14 @@ class SwarmTask(BaseModel):
     worker_iterations: int = 0
 
 
-class SwarmMessage(BaseModel):
-    """Message passed between agents via the Mailbox file inbox.
-
-    Carries only summaries and artifact paths to avoid context bloat.
-
-    Attributes:
-        id: Unique message ID.
-        type: Message type, e.g. "task_result", "request", "broadcast".
-        from_agent: Sending agent ID.
-        to: Receiving agent ID.
-        content: Message body (summary level).
-        artifact_paths: Associated artifact file paths.
-        timestamp: ISO-format timestamp.
-    """
-
-    id: str
-    type: str
-    from_agent: str
-    to: str
-    content: str
-    artifact_paths: list[str] = Field(default_factory=list)
-    timestamp: str
-
-
 class SwarmEvent(BaseModel):
     """Swarm event log entry.
 
     Appended to events.jsonl; supports SSE streaming and post-run audit.
 
     Attributes:
-        type: Event type, e.g. "run_started", "task_completed", "task_failed".
+        type: Event type, e.g. "run_started", "task_completed", "task_failed",
+            "task_blocked" (upstream not completed → downstream skipped).
         agent_id: Associated agent ID (optional).
         task_id: Associated task ID (optional).
         data: Arbitrary additional data.
@@ -166,6 +160,21 @@ class SwarmRun(BaseModel):
         final_report: Final aggregated report text.
         total_input_tokens: Cumulative input tokens across all workers.
         total_output_tokens: Cumulative output tokens across all workers.
+        provider: LLM provider name in effect when the run started
+            (e.g. ``"openai"``, ``"anthropic"``, ``"deepseek"``). Captured from
+            ``LANGCHAIN_PROVIDER`` at run-creation time. ``None`` if the
+            provider could not be resolved. Per-agent overrides — declared via
+            :attr:`SwarmAgentSpec.model_name` — are not reflected here; this
+            field is the run-level default.
+        model: LLM model name in effect when the run started, captured from
+            ``LANGCHAIN_MODEL_NAME``. Same scoping rules as :attr:`provider`.
+        grounding_data: Pre-fetched OHLCV bars for any suffixed stock or
+            crypto symbols mentioned in :attr:`user_vars`. Captured once at
+            run-creation time by :mod:`src.swarm.grounding` so workers see
+            real recent prices instead of training-data prices. Keyed by the
+            original symbol string; each value is the list of bars returned
+            by the loader. ``None`` when no symbols were detected or every
+            fetch failed.
     """
 
     id: str
@@ -179,13 +188,16 @@ class SwarmRun(BaseModel):
     final_report: str | None = None
     total_input_tokens: int = 0
     total_output_tokens: int = 0
+    provider: str | None = None
+    model: str | None = None
+    grounding_data: dict[str, list[dict]] | None = None
 
 
 class WorkerResult(BaseModel):
     """Return value after worker execution completes.
 
     Attributes:
-        status: "completed" or "failed".
+        status: WorkerStatus — completed|failed|timeout|token_limit|incomplete.
         summary: Execution summary.
         artifact_paths: List of generated artifact file paths.
         iterations: Actual ReAct iterations executed.
@@ -194,7 +206,7 @@ class WorkerResult(BaseModel):
         output_tokens: Cumulative output tokens (exact or estimated).
     """
 
-    status: str
+    status: WorkerStatus
     summary: str
     artifact_paths: list[str] = Field(default_factory=list)
     iterations: int = 0

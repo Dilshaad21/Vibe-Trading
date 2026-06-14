@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from backtest.loaders.registry import VALID_SOURCES
+from src.agent.progress import emit_progress
 from src.agent.tools import BaseTool
 from src.core.runner import Runner
 from src.tools.path_utils import safe_run_dir
@@ -19,6 +21,7 @@ def run_backtest(run_dir: str) -> str:
     Returns:
         JSON-formatted execution result.
     """
+    emit_progress("validate", message="validating run_dir and config")
     try:
         run_path = safe_run_dir(run_dir)
     except ValueError as exc:
@@ -36,9 +39,8 @@ def run_backtest(run_dir: str) -> str:
     if "source" not in config:
         return json.dumps({"status": "error", "error": "config.json missing 'source' field (tushare/okx/yfinance)"}, ensure_ascii=False)
 
-    valid_sources = {"tushare", "okx", "yfinance", "akshare", "ccxt", "auto"}
-    if config["source"] not in valid_sources:
-        return json.dumps({"status": "error", "error": f"source must be one of {valid_sources}, got: {config['source']}"}, ensure_ascii=False)
+    if config["source"] not in VALID_SOURCES:
+        return json.dumps({"status": "error", "error": f"source must be one of {VALID_SOURCES}, got: {config['source']}"}, ensure_ascii=False)
 
     signal_path = run_path / "code" / "signal_engine.py"
     if not signal_path.exists():
@@ -47,6 +49,11 @@ def run_backtest(run_dir: str) -> str:
     agent_root = Path(__file__).resolve().parents[2]
     entry_script = agent_root / "backtest" / "runner.py"
 
+    source = config.get("source", "?")
+    emit_progress(
+        "simulate",
+        message=f"running backtest engine (source={source})",
+    )
     runner = Runner(timeout=300)
     result = runner.execute(
         entry_script,
@@ -55,6 +62,7 @@ def run_backtest(run_dir: str) -> str:
         cli_args=[str(run_path)],
     )
 
+    emit_progress("finalize", message="collecting artifacts")
     artifacts_found = {name: str(path) for name, path in result.artifacts.items()}
     return json.dumps({
         "status": "ok" if result.success else "error",
