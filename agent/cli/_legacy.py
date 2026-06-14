@@ -2868,6 +2868,50 @@ def cmd_provider_doctor() -> int:
     return EXIT_SUCCESS
 
 
+def cmd_indmoney_login() -> int:
+    """Run interactive OAuth for INDMoney via the bundled helper script.
+
+    Delegates to ``scripts/indmoney_oauth.py``, which:
+      1. Hits the RFC 9728 protected-resource metadata at mcp.indmoney.com
+         to discover the authorization-server endpoints.
+      2. Performs Dynamic Client Registration (RFC 7591) to obtain a
+         client_id + client_secret without a pre-issued static client.
+      3. Drives Authorization Code + PKCE (RFC 6749 §4.1 + RFC 7636) via
+         a temporary 127.0.0.1:8765 callback listener.
+      4. Persists tokens (TokenCache) and client credentials separately.
+
+    We don't use ``oauth-cli-kit`` because INDMoney isn't in its provider
+    list and the mandatory PKCE + dynamic-registration flow is small
+    enough to implement directly.
+    """
+    import subprocess
+
+    script = AGENT_DIR.parent / "scripts" / "indmoney_oauth.py"
+    if not script.exists():
+        console.print(f"[red]OAuth helper not found at {script}[/red]")
+        return EXIT_RUN_FAILED
+    console.print("[cyan]Starting INDMoney OAuth login...[/cyan]\n")
+    try:
+        return subprocess.call([sys.executable, str(script)])
+    except Exception as exc:
+        console.print(f"[red]Authentication error:[/red] {exc}")
+        return EXIT_RUN_FAILED
+
+
+def cmd_indmoney_status() -> int:
+    """Print whether an INDMoney token is present and not expired."""
+    from src.integrations.indmoney.auth import TokenCache
+
+    token = TokenCache().load()
+    if token is None:
+        console.print("[yellow]No INDMoney token. Run: vibe-trading indmoney login[/yellow]")
+        return EXIT_USAGE_ERROR
+    expired = token.is_expired()
+    state = "[red]expired[/red]" if expired else "[green]valid[/green]"
+    console.print(f"INDMoney: {state}  account={token.account_id}  expires_at={token.expires_at}")
+    return EXIT_SUCCESS
+
+
 def _format_expiry_countdown(expires_at: str) -> str:
     """Return a human-readable countdown to ``expires_at`` (ISO-8601 UTC)."""
     from datetime import datetime, timezone
@@ -3966,6 +4010,11 @@ def _build_parser() -> argparse.ArgumentParser:
     login_parser.add_argument("provider", help="OAuth provider name, e.g. openai-codex")
     provider_subparsers.add_parser("doctor", help="Print redacted provider diagnostics")
 
+    indmoney_parser = subparsers.add_parser("indmoney", help="Manage INDMoney integration")
+    indmoney_subparsers = indmoney_parser.add_subparsers(dest="indmoney_command")
+    indmoney_subparsers.add_parser("login", help="Authenticate with INDMoney via OAuth")
+    indmoney_subparsers.add_parser("status", help="Show INDMoney token status")
+
     list_parser = subparsers.add_parser("list", help="List runs")
     list_parser.add_argument("--limit", dest="list_limit", type=int, default=20, help="Maximum number of runs")
 
@@ -4569,6 +4618,14 @@ def main(argv: list[str] | None = None) -> int:
         if args.provider_command == "doctor":
             return cmd_provider_doctor()
         console.print("[red]provider requires a subcommand.[/red] Try: vibe-trading provider doctor")
+        return EXIT_USAGE_ERROR
+    if args.command == "indmoney":
+        sub = getattr(args, "indmoney_command", None)
+        if sub == "login":
+            return cmd_indmoney_login()
+        if sub == "status":
+            return cmd_indmoney_status()
+        console.print("[red]indmoney requires a subcommand.[/red] Try: vibe-trading indmoney login")
         return EXIT_USAGE_ERROR
     if args.command == "run":
         return _handle_prompt_command(
