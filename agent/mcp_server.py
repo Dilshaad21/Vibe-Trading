@@ -1487,6 +1487,43 @@ def indmoney_sync() -> str:
     return registry.execute("indmoney_sync", {})
 
 
+@mcp.tool
+def us_portfolio_rebalance(
+    force_refresh: bool = False,
+    snapshot_path: str | None = None,
+    target_weights_pct: dict[str, float] | None = None,
+    max_position_pct: float = 10.0,
+) -> str:
+    """Analyze current INDMoney US stock holdings and size an optional rebalance.
+
+    The tool uses only holdings with asset_class=us_equity and the
+    US_STOCK_WALLET investment row. It reports US sleeve value, stock and
+    wallet weights, top-five concentration, and names above the requested
+    single-name threshold. No trades are placed.
+
+    Target weights are percentages of the whole US stock-plus-wallet sleeve.
+    They may cover only selected existing symbols: omitted holdings keep
+    their current dollar values and the wallet absorbs the net trades.
+    The output reports a funding gap if proposed buys exceed wallet plus
+    sells. Share counts use each holding's implied snapshot price and are
+    approximate; verify current quotes before any execution.
+    Pass snapshot_path to analyze a saved holdings file without a live
+    refresh; the result labels it as a saved snapshot with file time.
+
+    Args:
+        force_refresh: Skip the INDMoney holdings cache.
+        snapshot_path: Optional saved INDMoney holdings snapshot path.
+        target_weights_pct: Optional symbol-to-target-percent map.
+        max_position_pct: Threshold for concentration flags (default 10).
+    """
+    return _get_registry().execute("us_portfolio_rebalance", {
+        "force_refresh": force_refresh,
+        "snapshot_path": snapshot_path,
+        "target_weights_pct": target_weights_pct,
+        "max_position_pct": max_position_pct,
+    })
+
+
 # ---------------------------------------------------------------------------
 # Macro snapshot tool
 # ---------------------------------------------------------------------------
