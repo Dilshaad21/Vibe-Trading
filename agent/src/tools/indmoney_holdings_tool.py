@@ -81,6 +81,39 @@ def root_for_uploads() -> Path:
     return _allowed_file_roots()[0]
 
 
+def _incomplete_held_asset_types(snapshot: dict[str, Any]) -> list[str]:
+    """Find requested asset buckets whose positions disagree with net worth.
+
+    INDMoney can temporarily return an empty networth_holdings response while
+    networth_snapshot still reports invested value. Such a partial response
+    must not replace a complete cache entry or look like a liquidated book.
+    """
+    investments = snapshot.get("investments_by_asset_type") or []
+    holdings = snapshot.get("holdings") or []
+    requested = set(snapshot.get("asset_types") or [])
+    checks = (
+        ("US_STOCK", {"US_STOCK"}, "us_equity"),
+        ("IND_STOCK", {"STOCK", "IND_STOCK"}, "indian_equity"),
+        ("MF", {"MF"}, "mf"),
+    )
+    missing = []
+    for requested_type, investment_types, asset_class in checks:
+        if requested_type not in requested:
+            continue
+        reported_value = sum(
+            float(row.get("current_value") or 0)
+            for row in investments if row.get("asset_type") in investment_types
+        )
+        positions_value = sum(
+            float(h.get("market_value") or 0)
+            for h in holdings if h.get("asset_class") == asset_class
+        )
+        tolerance = max(0.01, reported_value * 0.01)
+        if max(reported_value, positions_value) > 0.01 and abs(reported_value - positions_value) > tolerance:
+            missing.append(requested_type)
+    return missing
+
+
 class IndMoneyHoldingsTool(BaseTool):
     name = "indmoney_holdings"
     description = (
@@ -129,7 +162,7 @@ class IndMoneyHoldingsTool(BaseTool):
 
         cached = cache.get(token.account_id, "holdings", "current",
                            force_refresh=force_refresh)
-        if cached is not None:
+        if cached is not None and not _incomplete_held_asset_types(cached):
             return json.dumps({"ok": True, **cached, "from_cache": True})
 
         try:
@@ -224,6 +257,16 @@ class IndMoneyHoldingsTool(BaseTool):
             "holdings": holdings,
             "cash": cash.to_dict(),
         }
+        missing = _incomplete_held_asset_types(snapshot)
+        if missing:
+            append_audit(cache.dir / "audit.log",
+                         account=token.account_id, action="fetch_holdings",
+                         outcome="incomplete",
+                         detail=f"Snapshot values disagree with holdings for: {', '.join(missing)}")
+            return json.dumps(build_error(
+                ErrorKind.UPSTREAM_ERROR,
+                f"INDMoney returned holdings inconsistent with its snapshot for {', '.join(missing)}; retry the read.",
+            ))
         snap_path = cache.put(token.account_id, "holdings", "current",
                               snapshot, ttl_seconds=DEFAULT_HOLDINGS_TTL)
         snapshot["snapshot_path"] = str(snap_path)
