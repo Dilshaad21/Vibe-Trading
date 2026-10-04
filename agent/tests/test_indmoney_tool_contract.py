@@ -20,6 +20,7 @@ from src.integrations.indmoney.auth import Token, TokenCache
 def _isolate(tmp_path, monkeypatch):
     """Redirect uploads root + token path + client-credentials path to tmp."""
     monkeypatch.setenv("VIBE_TRADING_ALLOWED_FILE_ROOTS", str(tmp_path))
+    monkeypatch.setattr("src.tools.indmoney_holdings_tool.root_for_uploads", lambda: tmp_path)
     monkeypatch.setattr(
         "src.integrations.indmoney.auth.DEFAULT_TOKEN_PATH",
         tmp_path / "token.json",
@@ -162,6 +163,70 @@ def test_holdings_tool_needs_auth_when_no_token(monkeypatch, tmp_path):
     out = json.loads(IndMoneyHoldingsTool().execute())
     assert out["ok"] is False
     assert out["error_kind"] == "needs_auth"
+
+
+def test_holdings_tool_rejects_snapshot_with_missing_us_positions(monkeypatch, tmp_path):
+    transport = _stub_transport({
+        "networth_snapshot": {
+            "total_invested": 100, "total_current_value": 200, "total_networth": 200,
+            "investments": [{"asset_type": "US_STOCK", "current_value": 200}],
+            "assets": [], "sector": [],
+        },
+        "networth_holdings": {"holdings": []},
+    })
+    from src.tools.indmoney_holdings_tool import IndMoneyHoldingsTool
+
+    _patch_httpx_client(monkeypatch, transport)
+    monkeypatch.setenv("INDMONEY_ASSET_TYPES", "US_STOCK")
+    monkeypatch.setenv("INDMONEY_USDINR_RATE", "100")
+    out = json.loads(IndMoneyHoldingsTool().execute(force_refresh=True))
+
+    assert out["ok"] is False
+    assert out["error_kind"] == "upstream_error"
+    assert "US_STOCK" in out["message"]
+    assert not (tmp_path / "indmoney" / ".index.json").exists()
+
+
+def test_holdings_check_rejects_partial_nonempty_us_positions():
+    from src.tools.indmoney_holdings_tool import _incomplete_held_asset_types
+
+    snapshot = {
+        "asset_types": ["US_STOCK"],
+        "investments_by_asset_type": [{"asset_type": "US_STOCK", "current_value": 100}],
+        "holdings": [{"asset_class": "us_equity", "market_value": 60}],
+    }
+    assert _incomplete_held_asset_types(snapshot) == ["US_STOCK"]
+
+
+def test_holdings_tool_ignores_incomplete_cached_snapshot(monkeypatch, tmp_path):
+    from src.integrations.indmoney.cache import SnapshotCache
+    from src.tools.indmoney_holdings_tool import IndMoneyHoldingsTool
+
+    SnapshotCache(root=tmp_path).put("acct1", "holdings", "current", {
+        "asset_types": ["US_STOCK"],
+        "investments_by_asset_type": [{"asset_type": "US_STOCK", "current_value": 2}],
+        "holdings": [],
+    }, ttl_seconds=900)
+    transport = _stub_transport({
+        "networth_snapshot": {
+            "total_invested": 100, "total_current_value": 200, "total_networth": 200,
+            "investments": [{"asset_type": "US_STOCK", "current_value": 200}],
+            "assets": [], "sector": [],
+        },
+        "networth_holdings": {"holdings": [{
+            "investment_code": "AAA", "investment": "Example US stock",
+            "asset_type": "US_STOCK", "invested_amount": 100,
+            "market_value": 200, "total_units": 2,
+        }]},
+    })
+    _patch_httpx_client(monkeypatch, transport)
+    monkeypatch.setenv("INDMONEY_ASSET_TYPES", "US_STOCK")
+    monkeypatch.setenv("INDMONEY_USDINR_RATE", "100")
+    out = json.loads(IndMoneyHoldingsTool().execute())
+
+    assert out["ok"] is True
+    assert out["from_cache"] is False
+    assert [h["symbol"] for h in out["holdings"]] == ["AAA"]
 
 
 def test_sync_tool_returns_aggregate_status(monkeypatch, tmp_path):
